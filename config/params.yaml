@@ -1,0 +1,7 @@
+/cone_detection_node:
+    ros__parameters:
+      hui: true
+      filter_min: -0.38
+      filter_max: 3.0
+      lidar_points_topic: "/lidar/Lidar1"
+      frame_id: "/fsds/Lidar1"
