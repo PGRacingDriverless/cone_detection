@@ -18,6 +18,12 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+
+#include "cones/cone_array.hpp"
+#include "cones/cone_pair_array.hpp"
+#include "pathplanner_msgs/msg/cone_pair_array.hpp"
+#include "pathplanner_msgs/msg/cone_array.hpp"
 
 #include <pcl/kdtree/kdtree.h>
 
@@ -31,12 +37,14 @@ public:
 
 private:
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
-    //void publish_markers_to_RVIZ(const std::vector<Cluster> &clusters);
+    void publishPose();
 
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_sub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pose_array_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
+    rclcpp::Publisher<pathplanner_msgs::msg::ConePairArray>::SharedPtr cone_pair_array_publisher_;
 
     std::string lidar_points_topic_;
     std::string frame_id_;
