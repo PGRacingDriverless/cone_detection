@@ -2,54 +2,66 @@
 #define CONE_DETECTION_NODE_HPP_
 
 #include "rclcpp/rclcpp.hpp"
-#include "sensor_msgs/msg/point_cloud2.hpp"
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl/filters/passthrough.h>
-#include <pcl/segmentation/extract_clusters.h>
-#include <pcl/filters/extract_indices.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <pcl/segmentation/sac_segmentation.h>
 
-#include <pcl/common/angles.h>
-#include <pcl/common/centroid.h>
-
-#include <visualization_msgs/msg/marker_array.hpp>
-#include <visualization_msgs/msg/marker.hpp>
-#include <geometry_msgs/msg/pose_array.hpp>
-#include <geometry_msgs/msg/pose.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/image.hpp>
 
 #include "cones/cone_array.hpp"
-#include "cones/cone_pair_array.hpp"
-#include "pathplanner_msgs/msg/cone_pair_array.hpp"
+#include "cones/cone.hpp"
+#include "pathplanner_msgs/msg/cone.hpp"
 #include "pathplanner_msgs/msg/cone_array.hpp"
 
-#include <pcl/kdtree/kdtree.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/synchronizer.h>
+#include "message_filters/time_synchronizer.h"
 
-#include <pcl/point_types.h>
+#include "model.hpp"
+#include <cv_bridge/cv_bridge.h>
+#include <rclcpp/qos.hpp>
 
-using std::placeholders::_1;
+#include <opencv2/opencv.hpp>
+#include <cmath>
+#include <limits>
 
-class ConeDetector : public rclcpp::Node {
+using namespace message_filters;
+
+class ConeDetection : public rclcpp::Node {
 public:
-    ConeDetector(const rclcpp::NodeOptions &node_options);
+    ConeDetection(const rclcpp::NodeOptions &node_options);
 
 private:
-    void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
-    void publishPose();
+    
+    void cone_detection_callback(
+        const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
+        const sensor_msgs::msg::Image::ConstSharedPtr &image_msg);
 
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_sub_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_pub_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pose_array_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
-    rclcpp::Publisher<pathplanner_msgs::msg::ConePairArray>::SharedPtr cone_pair_array_publisher_;
+    std::vector<cv::Rect> camera_cones_detect(cv_bridge::CvImagePtr cv_image_ptr);
 
+
+    // SYNC
+    std::shared_ptr<Synchronizer<sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>> sync_;
+    std::shared_ptr<Subscriber<sensor_msgs::msg::Image>> image_sub_;
+    std::shared_ptr<Subscriber<sensor_msgs::msg::PointCloud2>> pc2_sub_;        
+
+    rclcpp::Publisher<pathplanner_msgs::msg::ConeArray>::SharedPtr detected_cones_pub_;
+
+
+    std::string detected_cones_topic_ = "detected_cones";
     std::string lidar_points_topic_;
+    std::string camera_image_topic_;
     std::string frame_id_;
-    double filter_min_;
-    double filter_max_;
+
+    std::shared_ptr<Model> model_;
+    Eigen::Matrix4f camera_to_lidar_;
+
+    bool test_visualization_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr detection_frames_publisher_;
+    std::string detection_frames_topic_ = "camera/image_detected";
 
 };
 

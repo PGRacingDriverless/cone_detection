@@ -1,203 +1,231 @@
 #include "cone_detection/cone_detection.hpp"
-#include <cmath>
 
-ConeDetector::ConeDetector(const rclcpp::NodeOptions &node_options) 
+using namespace message_filters;
+using namespace std::chrono_literals;
+
+ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options) 
 : Node("cone_detection", node_options)
 {
     lidar_points_topic_ = this->declare_parameter<std::string>("lidar_points_topic");
+    camera_image_topic_ = this->declare_parameter<std::string>("camera_image_topic");
+
     frame_id_ = this->declare_parameter<std::string>("frame_id");
-    filter_min_ = this->declare_parameter<double>("filter_min");
-    filter_max_ = this->declare_parameter<double>("filter_max");
 
-    point_cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-        lidar_points_topic_, 10, std::bind(&ConeDetector::pointCloudCallback, this, _1));
+    // ---- SYNC ----
+    // Custom qos profile and options for subscrubers
+    rmw_qos_profile_t custom_qos = rmw_qos_profile_default;
+    custom_qos.history=RMW_QOS_POLICY_HISTORY_KEEP_LAST;
+    //custom_qos.history=RMW_QOS_POLICY_HISTORY_KEEP_ALL;
+    custom_qos.depth=10;
+    //custom_qos.reliability=RMW_QOS_POLICY_RELIABILITY_RELIABLE;
+    custom_qos.reliability=RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT;
+    custom_qos.durability=RMW_QOS_POLICY_DURABILITY_VOLATILE;
+    //custom_qos.durability=RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL;
+    rclcpp::SubscriptionOptions sub_options;
+    //sub_options.callback_group=callback_group_subs_;
+    sub_options.callback_group=nullptr;
+    sub_options.use_default_callbacks=false;
+    sub_options.ignore_local_publications=false;
 
-    filtered_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("filtered_points", 10);
-    marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_marker_array", 10);
-    pose_array_pub_ = this->create_publisher<geometry_msgs::msg::PoseArray>("clustered_points", 10);
-    pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("pose", 10);
-    cone_pair_array_publisher_ = this->create_publisher<pathplanner_msgs::msg::ConePairArray>("cone_pair_array", 10);
+    pc2_sub_ = std::make_shared<Subscriber<sensor_msgs::msg::PointCloud2>>(this, lidar_points_topic_, custom_qos, sub_options);
+    image_sub_ = std::make_shared<Subscriber<sensor_msgs::msg::Image>>(this, camera_image_topic_, custom_qos, sub_options);
+
+    sync_ = std::make_shared<Synchronizer<sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>>(
+        sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>(30), // Queue size
+        *pc2_sub_, *image_sub_
+    );
+
+    sync_->registerCallback(std::bind(&ConeDetection::cone_detection_callback, this, std::placeholders::_1, std::placeholders::_2));
+    // ----
+
+
+    detected_cones_pub_ =
+        this->create_publisher<pathplanner_msgs::msg::ConeArray>(detected_cones_topic_, 5);
+
+    ModelParams params;
+    // Read params for the model from the .yaml config file
+    const std::string model_path =
+        this->declare_parameter<std::string>("model_path");
+    const std::vector<std::string> classes =
+        this->declare_parameter<std::vector<std::string>>("classes");
+    const int width = this->declare_parameter<int>("width");
+    const int height = this->declare_parameter<int>("height");
+    const double iou_threshold =
+        this->declare_parameter<double>("iou_threshold");
+    const double rect_confidence_threshold =
+        this->declare_parameter<double>("rect_confidence_threshold");
+    // Set all params
+    params.model_path = model_path;
+    params.classes = classes;
+    params.img_size = { width, height };
+    params.iou_threshold = iou_threshold;
+    params.rect_confidence_threshold = rect_confidence_threshold;
+
+    SessionOptions options;
+    // Read options for the session from the .yaml config file
+    const bool cuda_enable = this->declare_parameter<bool>("cuda_enable");
+    const int intra_op_num_threads =
+        this->declare_parameter<int>("intra_op_num_threads");
+    const int log_severity_level =
+        this->declare_parameter<int>("log_severity_level");
+    // Set all options
+
+// For the case: "cudaEnable: true" in the config, but CUDA is not used.
+#ifdef USE_CUDA
+    options.cuda_enable = cuda_enable;
+#else
+    options.cuda_enable = false;
+#endif
+    options.intra_op_num_threads = intra_op_num_threads;
+    options.log_severity_level = log_severity_level;
+
+    // Create model instance and pointer to it
+    model_ = std::make_shared<Model>();
+    // Create a session with specified options
+    model_->init(options, params);
+
+
+    // TESTING ONLY VISUALIZATION
+    test_visualization_ = this->declare_parameter<bool>("test_visualization");
+    if(test_visualization_)
+    {
+        detection_frames_publisher_ =
+            this->create_publisher<sensor_msgs::msg::Image>(detection_frames_topic_, 5);
+    }
+
+    // Calibration matrix
+    camera_to_lidar_ << 0.999, 0.001, 0.012, 0.1,
+                        -0.001, 0.999, -0.005, 0.2,
+                        -0.012, 0.005, 0.999, 0.3,
+                        0.0, 0.0, 0.0, 1.0;
 }
 
-void ConeDetector::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+
+void ConeDetection::cone_detection_callback(
+    const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
+    const sensor_msgs::msg::Image::ConstSharedPtr &image_msg)
 {
+    // Detected cones to publish for path_planning
+    auto cones_message = pathplanner_msgs::msg::ConeArray();
+
+    // Convert ROS image_msg to CV image
+    cv_bridge::CvImagePtr cv_image_ptr;
+    try
+    {
+        /**
+         * toCvCopy and toCvShare difference, encodings, etc.:
+         * @see https://wiki.ros.org/cv_bridge/Tutorials/UsingCvBridgeToConvertBetweenROSImagesAndOpenCVImages
+        */
+        cv_image_ptr = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
+    }
+    catch (cv_bridge::Exception& e)
+    {
+        RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
+        return;
+    }
+
+    // Detect cones
+    std::vector<cv::Rect> detected_cones = camera_cones_detect(cv_image_ptr);
+
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::fromROSMsg(*msg, *cloud);
+    pcl::fromROSMsg(*point_cloud_msg, *cloud);
 
-    pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
-    pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
-    
-    pcl::SACSegmentation<pcl::PointXYZ> seg;
-    seg.setOptimizeCoefficients(true);
-    seg.setModelType(pcl::SACMODEL_PLANE);
-    seg.setMethodType(pcl::SAC_RANSAC);
-    seg.setDistanceThreshold(0.02);
-    seg.setInputCloud(cloud);
-    seg.segment(*inliers, *coefficients);
+    int img_width = cv_image_ptr->image.cols;
+    int img_height = cv_image_ptr->image.rows;
 
-    pcl::ExtractIndices<pcl::PointXYZ> extract;
-    pcl::PointCloud<pcl::PointXYZ>::Ptr ground_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    extract.setInputCloud(cloud);
-    extract.setIndices(inliers);
-    extract.setNegative(false); 
-    extract.filter(*ground_cloud);
+    for (const auto& rect : detected_cones) {
+        std::shared_ptr<pathplanner_msgs::msg::Cone> cone;
+        int center_x = rect.x + rect.width / 2;
+        int center_y = rect.y + rect.height / 2;
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr non_ground_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    extract.setNegative(true); 
-    extract.filter(*non_ground_cloud);
+        float normalized_x = static_cast<float>(center_x) / img_width;
+        float normalized_y = static_cast<float>(center_y) / img_height;
 
-    sensor_msgs::msg::PointCloud2 filtered_msg;
-    pcl::toROSMsg(*non_ground_cloud, filtered_msg);
-    filtered_msg.header = msg->header;
-    filtered_pub_->publish(filtered_msg);
-    
-    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
-    tree->setInputCloud(non_ground_cloud);
+        pcl::PointXYZ closest_point;
+        float min_dist = std::numeric_limits<float>::max();
 
-    std::vector<pcl::PointIndices> cluster_indices;
-    pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
-    ec.setClusterTolerance(0.3);
-    ec.setMinClusterSize(5);
-    ec.setSearchMethod(tree);
-    ec.setInputCloud(non_ground_cloud);
-    ec.extract(cluster_indices);
+        for (const auto& point : cloud->points) {
+            float dist = std::sqrt(std::pow(point.x - normalized_x * img_width, 2) +
+                                   std::pow(point.y - normalized_y * img_height, 2));
 
-    visualization_msgs::msg::MarkerArray marker_array;
-    geometry_msgs::msg::PoseArray pose_array;
-    pose_array.header.stamp = this->get_clock()->now();
-    pose_array.header.frame_id = frame_id_;
-    
-    pathplanner_msgs::msg::ConePairArray pairs_message;
-    ConePairArray m_cone_pair_array;
+            if (dist < min_dist) {
+                min_dist = dist;
+                closest_point = point;
 
-    std::vector<geometry_msgs::msg::Pose> cone_poses;
-   
-    for (const auto& indices : cluster_indices) {
-        if (indices.indices.empty()) continue;
-
-        Eigen::Vector4f centroid;
-        pcl::compute3DCentroid(*non_ground_cloud, indices.indices, centroid);
-        geometry_msgs::msg::Pose pose;
-        pose.position.x = centroid[0];
-        pose.position.y = centroid[1];  
-        pose.position.z = centroid[2];
-        cone_poses.push_back(pose);
-    }
-
-    for (size_t i = 0; i < cone_poses.size(); i += 2) {
-        if (i + 1 < cone_poses.size()) {
-            pathplanner_msgs::msg::ConePair cone_pair;
-
-            const auto& cone1 = cone_poses[i];
-            const auto& cone2 = cone_poses[i + 1];
-
-            double mid_x = (cone1.position.x + cone2.position.x) / 2.0;
-            double mid_y = (cone1.position.y + cone2.position.y) / 2.0;
-
-            double vec1_x = cone1.position.x - mid_x;
-            double vec1_y = cone1.position.y - mid_y;
-            double vec2_x = cone2.position.x - mid_x;
-            double vec2_y = cone2.position.y - mid_y;
-
-            double angle1 = std::atan2(vec1_y, vec1_x);
-            double angle2 = std::atan2(vec2_y, vec2_x);
-
-            if (angle1 < angle2) {
-                cone_pair.cone_inner.x = cone1.position.x;
-                cone_pair.cone_inner.y = cone1.position.y;
-                cone_pair.cone_inner.side = 1; 
-
-                cone_pair.cone_outer.x = cone2.position.x;
-                cone_pair.cone_outer.y = cone2.position.y;
-                cone_pair.cone_outer.side = 0; 
-            } else {
-                cone_pair.cone_inner.x = cone2.position.x;
-                cone_pair.cone_inner.y = cone2.position.y;
-                cone_pair.cone_inner.side = 1; 
-
-                cone_pair.cone_outer.x = cone1.position.x;
-                cone_pair.cone_outer.y = cone1.position.y;
-                cone_pair.cone_outer.side = 0; 
+                auto cone_detail = pathplanner_msgs::msg::Cone();
+                cone_detail.x = closest_point.x;
+                cone_detail.y = closest_point.y;
+                cone_detail.side = 0;
+                cones_message.cone_array.push_back(cone_detail);
+                // YELLOW - INNER = 1 
+                // BLUE - OUTER = 0
             }
-
-            pairs_message.cone_pair_array.push_back(cone_pair);
-                        
-            visualization_msgs::msg::Marker outer_marker;
-            outer_marker.header.frame_id = frame_id_;
-            outer_marker.header.stamp = this->get_clock()->now();
-            outer_marker.ns = "cone_pairs";
-            outer_marker.id = i; 
-            outer_marker.type = visualization_msgs::msg::Marker::CYLINDER;
-            outer_marker.action = visualization_msgs::msg::Marker::ADD;
-
-            outer_marker.pose.position.x = cone_pair.cone_outer.x;
-            outer_marker.pose.position.y = cone_pair.cone_outer.y;
-            outer_marker.pose.position.z = 0.0; 
-            outer_marker.pose.orientation.x = 0.0;
-            outer_marker.pose.orientation.y = 0.0;
-            outer_marker.pose.orientation.z = 0.0;
-            outer_marker.pose.orientation.w = 1.0; 
-
-            outer_marker.scale.x = 0.15; 
-            outer_marker.scale.y = 0.15; 
-            outer_marker.scale.z = 0.25; 
-            outer_marker.color.a = 1.0; 
-            outer_marker.color.r = 0.0; 
-            outer_marker.color.g = 0.0;
-            outer_marker.color.b = 1.0;
-            marker_array.markers.push_back(outer_marker);
-
-            visualization_msgs::msg::Marker inner_marker;
-            inner_marker.header.frame_id = frame_id_;
-            inner_marker.header.stamp = this->get_clock()->now();
-            inner_marker.ns = "cone_pairs";
-            inner_marker.id = i + 1; 
-            inner_marker.type = visualization_msgs::msg::Marker::CYLINDER;
-            inner_marker.action = visualization_msgs::msg::Marker::ADD;
-
-            inner_marker.pose.position.x = cone_pair.cone_inner.x;
-            inner_marker.pose.position.y = cone_pair.cone_inner.y;
-            inner_marker.pose.position.z = 0.0; 
-            inner_marker.pose.orientation.x = 0.0;
-            inner_marker.pose.orientation.y = 0.0;
-            inner_marker.pose.orientation.z = 0.0;
-            inner_marker.pose.orientation.w = 1.0; 
-
-            inner_marker.scale.x = 0.15; 
-            inner_marker.scale.y = 0.15; 
-            inner_marker.scale.z = 0.25; 
-            inner_marker.color.a = 1.0; 
-            inner_marker.color.r = 0.0; 
-            inner_marker.color.g = 1.0;
-            inner_marker.color.b = 0.0;
-            marker_array.markers.push_back(inner_marker);
         }
+
+        if(test_visualization_)
+            cv::circle(cv_image_ptr->image, cv::Point(center_x, center_y), 5, cv::Scalar(0, 255, 0), -1);
     }
 
-    marker_pub_->publish(marker_array);
-    pose_array_pub_->publish(pose_array);
-    publishPose();
-    cone_pair_array_publisher_->publish(pairs_message);
+    // Publish detected cones
+    detected_cones_pub_->publish(cones_message);
+
+
+    if(test_visualization_)
+    { 
+        // Convert CV image to ROS msg
+        std::shared_ptr<sensor_msgs::msg::Image> edited_image_msg
+            = cv_image_ptr->toImageMsg();
+        // Create output msg and assigning values from edited_image_msg pointer to it 
+        sensor_msgs::msg::Image output_image_msg;
+        output_image_msg.header = edited_image_msg->header;
+        output_image_msg.height = edited_image_msg->height;
+        output_image_msg.width = edited_image_msg->width;
+        output_image_msg.encoding = edited_image_msg->encoding;
+        output_image_msg.is_bigendian = edited_image_msg->is_bigendian;
+        output_image_msg.step = edited_image_msg->step;
+        output_image_msg.data = edited_image_msg->data;
+        // Publish message with detected cones
+        detection_frames_publisher_->publish(output_image_msg);
+    }
 }
 
-void ConeDetector::publishPose() {
-    geometry_msgs::msg::PoseStamped pose_;
+std::vector<cv::Rect> ConeDetection::camera_cones_detect(cv_bridge::CvImagePtr cv_image_ptr)
+{
+    std::vector<cv::Rect> detected_cones;
+    std::vector<ModelResult> res = model_->detect(cv_image_ptr->image);
 
-    pose_.header.stamp = this->now();
-    pose_.header.frame_id = frame_id_;
+    for (auto& r : res)
+    {
+        cv::Scalar color(0, 256, 0);
 
-    pose_.pose.position.x = 0.0;
-    pose_.pose.position.y = 0.0;
-    pose_.pose.position.z = 0.0;
+        detected_cones.push_back(r.box);
+        cv::rectangle(cv_image_ptr->image, r.box, color, 3);
 
-    pose_.pose.orientation.x = 0.0;
-    pose_.pose.orientation.y = 0.0;
-    pose_.pose.orientation.z = 0.0;
-    pose_.pose.orientation.w = 1.0;
+        float confidence = floor(100 * r.confidence) / 100;
+        std::string label = model_->get_class_by_id(r.class_id) + " " +
+            std::to_string(confidence).substr(0, std::to_string(confidence).size() - 4);
 
-    pose_pub_->publish(pose_);
+        cv::rectangle(
+            cv_image_ptr->image,
+            cv::Point(r.box.x, r.box.y - 25),
+            cv::Point(r.box.x + label.length() * 15, r.box.y),
+            color,
+            cv::FILLED
+        );
+
+        cv::putText(
+            cv_image_ptr->image,
+            label,
+            cv::Point(r.box.x, r.box.y - 5),
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.75,
+            cv::Scalar(0, 0, 0),
+            2
+        );
+    }
+
+    return detected_cones;
 }
-
 
 #include "rclcpp_components/register_node_macro.hpp"
-RCLCPP_COMPONENTS_REGISTER_NODE(ConeDetector)
+RCLCPP_COMPONENTS_REGISTER_NODE(ConeDetection)

@@ -4,4 +4,23 @@
       filter_min: -0.38
       filter_max: 3.0
       lidar_points_topic: "/lidar/Lidar1"
+      camera_image_topic: "/fsds/cam1/image_color"
       frame_id: "/fsds/Lidar1"
+
+      # === Model params ===
+      model_path: "/home/ros/ws/src/cone_detection/models/cones_v3_1280.onnx"
+      classes: ["cone"] # "/home/ros/ws/src/camera/models/classes.txt"
+      # model_type: 1
+      width: 1280  # imgSize[0]
+      height: 1280 # imgSize[1]
+      iou_threshold: 0.5
+      rect_confidence_threshold: 0.4
+      # === Session options ===
+      cuda_enable: true
+      # Note: Log severity level. See:
+      # https://github.com/microsoft/onnxruntime/blob/main/include/onnxruntime/core/common/logging/severity.h
+      log_severity_level: 3
+      intra_op_num_threads: 1
+
+      # TESTING ONLY, OTHERWISE IT MUST BE false
+      test_visualization: true
