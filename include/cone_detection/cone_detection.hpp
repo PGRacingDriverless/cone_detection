@@ -10,6 +10,10 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
+#include <visualization_msgs/msg/marker_array.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+#include <geometry_msgs/msg/point.hpp>
+
 #include "cones/cone_array.hpp"
 #include "cones/cone.hpp"
 #include "pathplanner_msgs/msg/cone.hpp"
@@ -40,7 +44,7 @@ private:
         const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
         const sensor_msgs::msg::Image::ConstSharedPtr &image_msg);
 
-    std::vector<cv::Rect> camera_cones_detect(cv_bridge::CvImagePtr cv_image_ptr);
+    std::vector<std::pair<std::string, cv::Rect>> camera_cones_detect(cv_bridge::CvImagePtr cv_image_ptr);
 
 
     // SYNC
@@ -59,10 +63,12 @@ private:
     std::shared_ptr<Model> model_;
     Eigen::Matrix4f camera_to_lidar_;
 
-    bool test_visualization_;
+    bool debug_mode_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr detection_frames_publisher_;
     std::string detection_frames_topic_ = "camera/image_detected";
-
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr markers_cones_publisher_;
+    std::string markers_cones_topic_ = "detected_cones_markers";
+    int marker_id_;
 };
 
 #endif // CONE_DETECTION_NODE_HPP_

@@ -85,12 +85,15 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     model_->init(options, params);
 
 
-    // TESTING ONLY VISUALIZATION
-    test_visualization_ = this->declare_parameter<bool>("test_visualization");
-    if(test_visualization_)
+    // DEGUB MODE
+    debug_mode_ = this->declare_parameter<bool>("debug_mode");
+    if(debug_mode_)
     {
         detection_frames_publisher_ =
             this->create_publisher<sensor_msgs::msg::Image>(detection_frames_topic_, 5);
+        markers_cones_publisher_ = 
+            this->create_publisher<visualization_msgs::msg::MarkerArray>(markers_cones_topic_, 5);
+        marker_id_ = 0;
     }
 
     // Calibration matrix
@@ -105,6 +108,9 @@ void ConeDetection::cone_detection_callback(
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &image_msg)
 {
+    // Markers for publish in debug mode
+    auto cones_markers_array = visualization_msgs::msg::MarkerArray();
+
     // Detected cones to publish for path_planning
     auto cones_message = pathplanner_msgs::msg::ConeArray();
 
@@ -125,7 +131,7 @@ void ConeDetection::cone_detection_callback(
     }
 
     // Detect cones
-    std::vector<cv::Rect> detected_cones = camera_cones_detect(cv_image_ptr);
+    std::vector<std::pair<std::string, cv::Rect>> detected_cones = camera_cones_detect(cv_image_ptr);
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromROSMsg(*point_cloud_msg, *cloud);
@@ -133,10 +139,10 @@ void ConeDetection::cone_detection_callback(
     int img_width = cv_image_ptr->image.cols;
     int img_height = cv_image_ptr->image.rows;
 
-    for (const auto& rect : detected_cones) {
+    for (const auto& pair : detected_cones) {
         std::shared_ptr<pathplanner_msgs::msg::Cone> cone;
-        int center_x = rect.x + rect.width / 2;
-        int center_y = rect.y + rect.height / 2;
+        int center_x = pair.second.x + pair.second.width / 2;
+        int center_y = pair.second.y + pair.second.height / 2;
 
         float normalized_x = static_cast<float>(center_x) / img_width;
         float normalized_y = static_cast<float>(center_y) / img_height;
@@ -155,23 +161,64 @@ void ConeDetection::cone_detection_callback(
                 auto cone_detail = pathplanner_msgs::msg::Cone();
                 cone_detail.x = closest_point.x;
                 cone_detail.y = closest_point.y;
-                cone_detail.side = 0;
-                cones_message.cone_array.push_back(cone_detail);
+
                 // YELLOW - INNER = 1 
                 // BLUE - OUTER = 0
+                if(pair.first == "yellow_cone")
+                    cone_detail.side = 1;
+                else if(pair.first == "blue_cone")
+                    cone_detail.side = 0;
+
+                cones_message.cone_array.push_back(cone_detail);
+
+                // DEGUB MODE
+                if(debug_mode_) {
+                    cv::circle(cv_image_ptr->image, cv::Point(center_x, center_y), 5, cv::Scalar(0, 255, 0), -1);
+
+                    // Merker for publish for each conus
+                    auto marker = visualization_msgs::msg::Marker();
+                    marker.header.frame_id = frame_id_;
+                    marker.header.stamp = this->now();
+                    marker.ns = "basic_shapes";
+                    marker.id = marker_id_++;
+                    marker.type = visualization_msgs::msg::Marker::CUBE;
+                    marker.action = visualization_msgs::msg::Marker::ADD;
+
+                    geometry_msgs::msg::Point point;
+                    point.x = cone_detail.x;
+                    point.y = cone_detail.y;
+                    point.z = 0.2;
+
+                    marker.pose.position = point;
+                    marker.pose.orientation.w = 1.0;
+                    marker.scale.x = 0.2;
+                    marker.scale.y = 0.2;
+                    marker.scale.z = 0.2;
+
+                    if(cone_detail.side == 1) {
+                        marker.color.r = 0.0;
+                        marker.color.g = 0.0;
+                        marker.color.b = 1.0;
+                    } else if(cone_detail.side == 0) {
+                        marker.color.r = 0.51;
+                        marker.color.g = 1.0;
+                        marker.color.b = 0.56;
+                    }
+
+                    marker.color.a = 1.0;
+                    marker.lifetime = rclcpp::Duration(0s);
+                    cones_markers_array.markers.push_back(marker);
+                }
             }
         }
-
-        if(test_visualization_)
-            cv::circle(cv_image_ptr->image, cv::Point(center_x, center_y), 5, cv::Scalar(0, 255, 0), -1);
     }
 
     // Publish detected cones
     detected_cones_pub_->publish(cones_message);
 
-
-    if(test_visualization_)
-    { 
+    
+    // DEGUB MODE
+    if(debug_mode_) { 
         // Convert CV image to ROS msg
         std::shared_ptr<sensor_msgs::msg::Image> edited_image_msg
             = cv_image_ptr->toImageMsg();
@@ -186,19 +233,21 @@ void ConeDetection::cone_detection_callback(
         output_image_msg.data = edited_image_msg->data;
         // Publish message with detected cones
         detection_frames_publisher_->publish(output_image_msg);
+        
+        markers_cones_publisher_->publish(cones_markers_array);
     }
 }
 
-std::vector<cv::Rect> ConeDetection::camera_cones_detect(cv_bridge::CvImagePtr cv_image_ptr)
+std::vector<std::pair<std::string, cv::Rect>> ConeDetection::camera_cones_detect(cv_bridge::CvImagePtr cv_image_ptr)
 {
-    std::vector<cv::Rect> detected_cones;
+    std::vector<std::pair<std::string, cv::Rect>> detected_cones;
     std::vector<ModelResult> res = model_->detect(cv_image_ptr->image);
 
     for (auto& r : res)
     {
         cv::Scalar color(0, 256, 0);
 
-        detected_cones.push_back(r.box);
+        detected_cones.push_back(std::make_pair(std::string(model_->get_class_by_id(r.class_id)), r.box));
         cv::rectangle(cv_image_ptr->image, r.box, color, 3);
 
         float confidence = floor(100 * r.confidence) / 100;

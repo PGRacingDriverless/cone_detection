@@ -23,4 +23,5 @@
       intra_op_num_threads: 1
 
       # TESTING ONLY, OTHERWISE IT MUST BE false
-      test_visualization: true
+      # enable visualization topics for rviz and debug info in console
+      debug_mode: true
