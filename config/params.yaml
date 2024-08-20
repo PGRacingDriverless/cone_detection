@@ -8,11 +8,11 @@
       frame_id: "/fsds/Lidar1"
 
       # === Model params ===
-      model_path: "/home/ros/ws/src/cone_detection/models/cones_v3_1280.onnx"
-      classes: ["cone"] # "/home/ros/ws/src/camera/models/classes.txt"
+      model_path: "/home/ros/ws/src/camera/models/fullDatabaseYolov8n640.onnx"
+      classes: ["seg_orange_cone", "unknown_cone", "yellow_cone", "seg_large_orange_cone", "seg_blue_cone", "seg_unknown_cone", "seg_yellow_cone", "blue_cone", "orange_cone", "large_orange_cone"] # "/home/ros/ws/src/camera/models/classes.txt"
       # model_type: 1
-      width: 1280  # imgSize[0]
-      height: 1280 # imgSize[1]
+      width: 640  # imgSize[0]
+      height: 640 # imgSize[1]
       iou_threshold: 0.5
       rect_confidence_threshold: 0.4
       # === Session options ===

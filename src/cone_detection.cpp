@@ -208,7 +208,7 @@ std::vector<cv::Rect> ConeDetection::camera_cones_detect(cv_bridge::CvImagePtr c
         cv::rectangle(
             cv_image_ptr->image,
             cv::Point(r.box.x, r.box.y - 25),
-            cv::Point(r.box.x + label.length() * 15, r.box.y),
+            cv::Point(r.box.x + label.length() * 10, r.box.y),
             color,
             cv::FILLED
         );
@@ -218,7 +218,7 @@ std::vector<cv::Rect> ConeDetection::camera_cones_detect(cv_bridge::CvImagePtr c
             label,
             cv::Point(r.box.x, r.box.y - 5),
             cv::FONT_HERSHEY_SIMPLEX,
-            0.75,
+            0.5,
             cv::Scalar(0, 0, 0),
             2
         );
