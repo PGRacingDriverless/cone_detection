@@ -136,8 +136,8 @@ void ConeDetection::cone_detection_callback(
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromROSMsg(*point_cloud_msg, *cloud);
 
-    int img_width = 1280;//cv_image_ptr->image.cols;
-    int img_height = 1280;//cv_image_ptr->image.rows;
+    int img_width = cv_image_ptr->image.cols;
+    int img_height = cv_image_ptr->image.rows;
 
     // Matrix calculated based on camera and lidar data using calculate_p_matrix.py
     cv::Mat projection_matrix = (cv::Mat_<double>(3, 4) << 
