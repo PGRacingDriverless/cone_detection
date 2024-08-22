@@ -136,80 +136,101 @@ void ConeDetection::cone_detection_callback(
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromROSMsg(*point_cloud_msg, *cloud);
 
-    int img_width = cv_image_ptr->image.cols;
-    int img_height = cv_image_ptr->image.rows;
+    int img_width = 1280;//cv_image_ptr->image.cols;
+    int img_height = 1280;//cv_image_ptr->image.rows;
+
+    // Matrix calculated based on camera and lidar data using calculate_p_matrix.py
+    cv::Mat projection_matrix = (cv::Mat_<double>(3, 4) << 
+        640, 0, 640, -704,
+        0, 640, 640, 256,
+        0, 0, 1, 0.4);
+
+    cv::Mat projection_matrix_inv;
+    cv::invert(projection_matrix, projection_matrix_inv, cv::DECOMP_SVD);
 
     for (const auto& pair : detected_cones) {
-        std::shared_ptr<pathplanner_msgs::msg::Cone> cone;
         int center_x = pair.second.x + pair.second.width / 2;
         int center_y = pair.second.y + pair.second.height / 2;
 
+        // Normalize coordinates
         float normalized_x = static_cast<float>(center_x) / img_width;
         float normalized_y = static_cast<float>(center_y) / img_height;
+
+        // Convert normalized coordinates to homogeneous coordinates
+        cv::Mat image_point = (cv::Mat_<double>(3, 1) << normalized_x * img_width, normalized_y * img_height, 1.0);
+
+        // Project point into 3D space using the inverse of the projection matrix
+        cv::Mat camera_point = projection_matrix_inv * image_point;
+
+        // Convert the resulting point to 3D coordinates
+        pcl::PointXYZ target_point(camera_point.at<double>(0), camera_point.at<double>(1), camera_point.at<double>(2));
 
         pcl::PointXYZ closest_point;
         float min_dist = std::numeric_limits<float>::max();
 
         for (const auto& point : cloud->points) {
-            float dist = std::sqrt(std::pow(point.x - normalized_x * img_width, 2) +
-                                   std::pow(point.y - normalized_y * img_height, 2));
+            float dist = std::sqrt(std::pow(point.x - target_point.x, 2) +
+                                   std::pow(point.y - target_point.y, 2) +
+                                   std::pow(point.z - target_point.z, 2));
 
             if (dist < min_dist) {
                 min_dist = dist;
                 closest_point = point;
-
-                auto cone_detail = pathplanner_msgs::msg::Cone();
-                cone_detail.x = closest_point.x;
-                cone_detail.y = closest_point.y;
-
-                // YELLOW - INNER = 1 
-                // BLUE - OUTER = 0
-                if(pair.first == "yellow_cone")
-                    cone_detail.side = 1;
-                else if(pair.first == "blue_cone")
-                    cone_detail.side = 0;
-
-                cones_message.cone_array.push_back(cone_detail);
-
-                // DEGUB MODE
-                if(debug_mode_) {
-                    cv::circle(cv_image_ptr->image, cv::Point(center_x, center_y), 5, cv::Scalar(0, 255, 0), -1);
-
-                    // Merker for publish for each conus
-                    auto marker = visualization_msgs::msg::Marker();
-                    marker.header.frame_id = frame_id_;
-                    marker.header.stamp = this->now();
-                    marker.ns = "basic_shapes";
-                    marker.id = marker_id_++;
-                    marker.type = visualization_msgs::msg::Marker::CUBE;
-                    marker.action = visualization_msgs::msg::Marker::ADD;
-
-                    geometry_msgs::msg::Point point;
-                    point.x = cone_detail.x;
-                    point.y = cone_detail.y;
-                    point.z = 0.2;
-
-                    marker.pose.position = point;
-                    marker.pose.orientation.w = 1.0;
-                    marker.scale.x = 0.2;
-                    marker.scale.y = 0.2;
-                    marker.scale.z = 0.2;
-
-                    if(cone_detail.side == 1) {
-                        marker.color.r = 0.0;
-                        marker.color.g = 0.0;
-                        marker.color.b = 1.0;
-                    } else if(cone_detail.side == 0) {
-                        marker.color.r = 0.51;
-                        marker.color.g = 1.0;
-                        marker.color.b = 0.56;
-                    }
-
-                    marker.color.a = 1.0;
-                    marker.lifetime = rclcpp::Duration(0s);
-                    cones_markers_array.markers.push_back(marker);
-                }
             }
+        }
+        RCLCPP_INFO(this->get_logger(), "Target Point: (%f, %f, %f)", target_point.x, target_point.y, target_point.z);
+        RCLCPP_INFO(this->get_logger(), "Closest Point: (%f, %f, %f)", closest_point.x, closest_point.y, closest_point.z);
+
+        auto cone_detail = pathplanner_msgs::msg::Cone();
+        cone_detail.x = closest_point.x;
+        cone_detail.y = closest_point.y;
+
+        // YELLOW - INNER = 1 
+        // BLUE - OUTER = 0
+        if(pair.first == "yellow_cone")
+            cone_detail.side = 1;
+        else if(pair.first == "blue_cone")
+            cone_detail.side = 0;
+
+        cones_message.cone_array.push_back(cone_detail);
+
+        // DEBUG MODE
+        if(debug_mode_) {
+            cv::circle(cv_image_ptr->image, cv::Point(center_x, center_y), 5, cv::Scalar(0, 255, 0), -1);
+
+            // Create and add a marker for each unique cone
+            auto marker = visualization_msgs::msg::Marker();
+            marker.header.frame_id = frame_id_;
+            marker.header.stamp = this->now();
+            marker.ns = "basic_shapes";
+            marker.id = marker_id_++;
+            marker.type = visualization_msgs::msg::Marker::CUBE;
+            marker.action = visualization_msgs::msg::Marker::ADD;
+
+            geometry_msgs::msg::Point point;
+            point.x = cone_detail.x;
+            point.y = cone_detail.y;
+            point.z = 0.2;
+
+            marker.pose.position = point;
+            marker.pose.orientation.w = 1.0;
+            marker.scale.x = 0.2;
+            marker.scale.y = 0.2;
+            marker.scale.z = 0.2;
+
+            if(cone_detail.side == 1) {
+                marker.color.r = 0.51;
+                marker.color.g = 1.0;
+                marker.color.b = 0.56;
+            } else if(cone_detail.side == 0) {
+                marker.color.r = 0.0;
+                marker.color.g = 0.0;
+                marker.color.b = 1.0;
+            }
+
+            marker.color.a = 1.0;
+            marker.lifetime = rclcpp::Duration(0s);
+            cones_markers_array.markers.push_back(marker);
         }
     }
 
@@ -235,6 +256,8 @@ void ConeDetection::cone_detection_callback(
         detection_frames_publisher_->publish(output_image_msg);
         
         markers_cones_publisher_->publish(cones_markers_array);
+        RCLCPP_INFO(this->get_logger(), "%d markers published", marker_id_);
+        RCLCPP_INFO(this->get_logger(), "%d detected cones", detected_cones.size());
     }
 }
 
