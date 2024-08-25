@@ -12,10 +12,13 @@
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>pcl_conversions</depend>
-  
   <depend>pcl_ros</depend>
   <depend>cv_bridge</depend>
   <depend>cone_pair_array</depend>
+
+  <depend>tf2_eigen</depend>
+  <depend>eigen_conversions</depend>
+  <depend>image_transport</depend>
 
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>

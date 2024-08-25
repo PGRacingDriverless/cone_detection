@@ -19,6 +19,18 @@ This project is focused on detecting traffic cones using LIDAR data. The primary
 | Cmake                 | >=3.5          |
 | Eigen                 |                |
 | PCL                   |                |
+| Armadillo             | >=11.0.1       |
+
+Download: http://arma.sourceforge.net/download.html
+```bash
+tar -xvf armadillo-14.0.2.tar.xz
+cd armadillo-14.0.2
+mkdir build
+cd build
+cmake ..
+make
+sudo make install
+```
 
 ## Features
 - **Ground Plane Segmentation:** Uses RANSAC to remove ground points from the LIDAR data.
