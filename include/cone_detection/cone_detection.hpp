@@ -91,8 +91,22 @@ private:
     std::string markers_cones_topic_ = "detected_cones_markers";
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pcOnimg_pub;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pc_pub;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr range_image_pub_;
+    
     int marker_id_;
 
+    // camera lidar fusion
+    float maxlen_;
+    float minlen_;
+    float max_FOV_;
+    float min_FOV_;
+    float angular_resolution_x_;
+    float angular_resolution_y_;
+    float max_angle_width_;
+    float max_angle_height_;
+    float max_var_;
+    float interpol_value_;
+    bool filter_pc_;
 };
 
 #endif // CONE_DETECTION_NODE_HPP_

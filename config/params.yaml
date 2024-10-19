@@ -5,6 +5,20 @@
       filter_max: 3.0
       lidar_points_topic: "/lidar/Lidar1"
       camera_image_topic: "/fsds/cam1/image_color"
+
+      # === Camera lidar fusion params ===
+      maxlen: 50.0
+      minlen: 0.02
+      max_FOV: 1.57
+      min_FOV: 0.01
+      angular_resolution_x: 0.06
+      angular_resolution_y: 0.06
+      max_angle_width: 90.0
+      max_angle_height: 22.5
+      max_var: 100.0
+      interpol_value: 10.0
+      filter_pc: true
+
       frame_id: "/fsds/Lidar1"
 
       # === Model params ===
@@ -26,23 +40,24 @@
       # enable visualization topics for rviz and debug info in console
       debug_mode: true
 
-      camera_matrix: [640.0000,   0.000000,   640.0000, 0.000000,
-                      0.000000,   640.0000,   640.0000, 0.000000,
+      # Camera matrix 
+      camera_matrix: [1280.0000,   0.000000,   640.0000, 0.000000,
+                      0.000000,   1280.0000,   640.0000, 0.000000,
                       0.000000,   0.000000,   1.000000, 0.000000]
 
+      # Rotation matrix depends on camera rotation regarding lidar
       rlc:  [1.0 , 0.0  ,0.0,  
              0.0 , 1.0  ,0.0,  
              0.0 , 0.0  ,1.0 ]
 
-      tlc: [ 1.5, 0.0, -0.4]
+      # Translation matrix (x, y, z) depends on camera position regarding lidar
+      tlc: [ 0.0, 0.0, -0.1]
 
-      # SIMILATION PARAMETERS
+      # SIMILATION PARAMETERS EXAMPLE
       #camera_matrix: [640.0000,   0.000000,   640.0000, 0.000000,
       #                0.000000,   640.0000,   640.0000, 0.000000,
       #                0.000000,   0.000000,   1.000000, 0.000000]
-
       #rlc:  [1.0 , 0.0  ,0.0,  
       #       0.0 , 1.0  ,0.0,  
       #       0.0 , 0.0  ,1.0 ]
-
       #tlc: [ 1.5, 0.0, -0.4]

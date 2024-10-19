@@ -9,7 +9,20 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     lidar_points_topic_ = this->declare_parameter<std::string>("lidar_points_topic");
     camera_image_topic_ = this->declare_parameter<std::string>("camera_image_topic");
 
+    maxlen_ = this->declare_parameter<float>("maxlen");
+    minlen_ = this->declare_parameter<float>("minlen");
+    max_FOV_ = this->declare_parameter<float>("max_FOV");
+    min_FOV_ = this->declare_parameter<float>("min_FOV");
+    angular_resolution_x_ = this->declare_parameter<float>("angular_resolution_x");
+    angular_resolution_y_ = this->declare_parameter<float>("angular_resolution_y");
+    max_angle_width_ = this->declare_parameter<float>("max_angle_width");
+    max_angle_height_ = this->declare_parameter<float>("max_angle_height");
+    max_var_ = this->declare_parameter<float>("max_var");
+    interpol_value_ = this->declare_parameter<float>("interpol_value");
+    filter_pc_ = this->declare_parameter<bool>("filter_pc");
+
     frame_id_ = this->declare_parameter<std::string>("frame_id");
+    range_image_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("range_image", 10);
 
     // ---- SYNC ----
     // Custom qos profile and options for subscrubers
@@ -50,10 +63,10 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
         this->declare_parameter<std::vector<std::string>>("classes");
     const int width = this->declare_parameter<int>("width");
     const int height = this->declare_parameter<int>("height");
-    const double iou_threshold =
-        this->declare_parameter<double>("iou_threshold");
-    const double rect_confidence_threshold =
-        this->declare_parameter<double>("rect_confidence_threshold");
+    const float iou_threshold =
+        this->declare_parameter<float>("iou_threshold");
+    const float rect_confidence_threshold =
+        this->declare_parameter<float>("rect_confidence_threshold");
     // Set all params
     params.model_path = model_path;
     params.classes = classes;
@@ -320,18 +333,6 @@ void ConeDetection::camera_lidar_fusion(
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &image_msg)
 {
-    float maxlen =100.0;       //maxima distancia del lidar
-    float minlen = 0.2;     //minima distancia del lidar
-    float max_FOV = 3.0;    
-    float min_FOV = 0.4;    
-    // parameters convertation from pc to image
-    float angular_resolution_x = 0.069;
-    float angular_resolution_y = 0.069;
-    float max_angle_width= 100.0f;
-    float max_angle_height = 100.0f;
-    double max_var = 50.0; 
-    bool f_pc = true; 
-    float interpol_value = 20.0;
     pcl::RangeImage::CoordinateFrame coordinate_frame = pcl::RangeImage::LASER_FRAME;
     pcl::RangeImage::Ptr rangeImage(new pcl::RangeImage);
 
@@ -367,8 +368,8 @@ void ConeDetection::camera_lidar_fusion(
     for (int i = 0; i < (int) cloud_in->points.size(); i++)
     {
         double distance = sqrt(cloud_in->points[i].x * cloud_in->points[i].x + cloud_in->points[i].y * cloud_in->points[i].y);     
-        if(distance<minlen || distance>maxlen)
-        continue;
+        if(distance < minlen_ || distance > maxlen_)
+            continue;
         cloud_out->push_back(cloud_in->points[i]);
     }
 
@@ -379,20 +380,18 @@ void ConeDetection::camera_lidar_fusion(
 
     // point cloud to image 
     Eigen::Affine3f sensorPose = Eigen::Affine3f::Identity();
-
     rangeImage->pcl::RangeImage::createFromPointCloud(
         *cloud_out, 
-        pcl::deg2rad(angular_resolution_x), 
-        pcl::deg2rad(angular_resolution_y),
-        pcl::deg2rad(max_angle_width), 
-        pcl::deg2rad(max_angle_height),
+        pcl::deg2rad(angular_resolution_x_), 
+        pcl::deg2rad(angular_resolution_y_),
+        pcl::deg2rad(max_angle_width_), 
+        pcl::deg2rad(max_angle_height_),
         sensorPose, 
         coordinate_frame, 
         0.0f, 
         0.0f, 
         0
     );
-    
     if (rangeImage->points.empty()) {
         RCLCPP_ERROR(this->get_logger(), "RangeImage empty");
         return; 
@@ -410,6 +409,13 @@ void ConeDetection::camera_lidar_fusion(
             }
         }
     }
+
+    sensor_msgs::msg::PointCloud2 range_output;
+    pcl::toROSMsg(*rangeImage, range_output);
+    range_output.header.frame_id = frame_id_;
+    range_output.header.stamp = this->get_clock()->now();
+
+    range_image_pub_->publish(range_output);
 
     cv::Mat range_image_normalized;
     cv::normalize(range_image_cv, range_image_normalized, 0, 255, cv::NORM_MINMAX);
@@ -442,9 +448,9 @@ void ConeDetection::camera_lidar_fusion(
             float r =  rangeImage->getPoint(i, j).range;     
             float zz = rangeImage->getPoint(i, j).z; 
 
-            if(std::isinf(r) || r<minlen || r>maxlen || std::isnan(zz)){
-            continue;
-            }             
+            if(std::isinf(r) || r < minlen_ || r > maxlen_ || std::isnan(zz))
+                continue;
+                        
             Z.at(j,i) = r;   
             Zz.at(j,i) = zz;
         }
@@ -455,7 +461,7 @@ void ConeDetection::camera_lidar_fusion(
     arma::vec Y = arma::regspace(1, Z.n_rows);  // Y = vertical spacing 
 
     arma::vec XI = arma:: regspace(X.min(), 1.0, X.max()); // magnify by approx 2
-    arma::vec YI = arma::regspace(Y.min(), 1.0/interpol_value, Y.max()); // 
+    arma::vec YI = arma::regspace(Y.min(), 1.0/interpol_value_, Y.max()); // 
 
     arma::mat ZI_near;  
     arma::mat ZI;
@@ -478,46 +484,46 @@ void ConeDetection::camera_lidar_fusion(
         for (uint j=0; j<ZI.n_cols ; j+=1) {             
             if((ZI(i,j)== 0 ))
             {
-            if(i+interpol_value<ZI.n_rows)
-                for (int k=1; k<= interpol_value; k+=1) 
-                Zout(i+k,j)=0;
-            if(i>interpol_value)
-                for (int k=1; k<= interpol_value; k+=1) 
-                Zout(i-k,j)=0;
+            if(i+interpol_value_<ZI.n_rows)
+                for (int k=1; k<= interpol_value_; k+=1) 
+                    Zout(i+k,j)=0;
+            if(i>interpol_value_)
+                for (int k=1; k<= interpol_value_; k+=1) 
+                    Zout(i-k,j)=0;
             }
         }      
     }
 
-    if (f_pc){    
-    /// filtering by variance
-        for (uint i=0; i< ((ZI.n_rows-1)/interpol_value); i+=1)      
+    if (filter_pc_){    
+    // filtering by variance
+        for (uint i=0; i< ((ZI.n_rows-1)/interpol_value_); i+=1)      
             for (uint j=0; j<ZI.n_cols-5 ; j+=1) {
                 double promedio = 0;
-                double varianza = 0;
-                for (uint k=0; k<interpol_value ; k+=1)
-                    promedio = promedio+ZI((i*interpol_value)+k,j);
+                double variance = 0;
+                for (uint k=0; k<interpol_value_; k+=1)
+                    promedio = promedio+ZI((i*interpol_value_)+k,j);
 
-                promedio = promedio / interpol_value;    
+                promedio = promedio / interpol_value_;    
 
-                for (uint l = 0; l < interpol_value; l++) 
-                    varianza = varianza + pow((ZI((i*interpol_value)+l,j) - promedio), 2.0);  
+                for (uint l = 0; l < interpol_value_; l++) 
+                    variance = variance + pow((ZI((i*interpol_value_)+l,j) - promedio), 2.0);  
                 
 
-                if(varianza>max_var)
-                    for (uint m = 0; m < interpol_value; m++) 
-                    Zout((i*interpol_value)+m,j) = 0;                 
+                if(variance > max_var_)
+                    for (uint m = 0; m < interpol_value_; m++) 
+                    Zout((i*interpol_value_)+m,j) = 0;                 
             }   
         ZI = Zout;
     }
 
     // range image to point cloud 
     int num_pc = 0; 
-    for (uint i=0; i< ZI.n_rows - interpol_value; i+=1) {       
+    for (uint i=0; i< ZI.n_rows - interpol_value_; i+=1) {       
       for (uint j=0; j<ZI.n_cols ; j+=1) {
         float ang = M_PI-((2.0 * M_PI * j )/(ZI.n_cols));
 
-        if (ang < min_FOV-M_PI/2.0|| ang > max_FOV - M_PI/2.0) 
-          continue;
+        //if (ang < min_FOV_ - M_PI/2.0|| ang >  max_FOV_- M_PI/2.0) 
+          //continue;
 
         if(!(Zout(i,j)== 0 )) {  
           float pc_modulo = Zout(i,j);
@@ -586,7 +592,7 @@ void ConeDetection::camera_lidar_fusion(
         if(px_data<0.0 || px_data>=cols || py_data<0.0 || py_data>=rows)
             continue;
 
-        int color_dis_x = (int)(255*((P_out->points[i].x)/maxlen));
+        int color_dis_x = (int)(255*((P_out->points[i].x)/maxlen_));
         int color_dis_z = (int)(255*((P_out->points[i].x)/10.0));
         if(color_dis_z>255)
             color_dis_z = 255;
