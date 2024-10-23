@@ -429,13 +429,12 @@ void ConeDetection::camera_lidar_fusion(
     range_image_msg.step = range_image_normalized.cols;
     range_image_msg.data.assign(range_image_normalized.datastart, range_image_normalized.dataend);
 
-    pcOnimg_pub->publish(range_image_msg);
+    //pcOnimg_pub->publish(range_image_msg);
 
     int cols_img = rangeImage->width;
     int rows_img = rangeImage->height;
 
-
-    arma::mat Z; 
+    arma::mat Z;
     arma::mat Zz;
 
     Z.zeros(rows_img,cols_img);         
@@ -522,8 +521,8 @@ void ConeDetection::camera_lidar_fusion(
       for (uint j=0; j<ZI.n_cols ; j+=1) {
         float ang = M_PI-((2.0 * M_PI * j )/(ZI.n_cols));
 
-        //if (ang < min_FOV_ - M_PI/2.0|| ang >  max_FOV_- M_PI/2.0) 
-          //continue;
+        if (ang < min_FOV_ - M_PI/2.0 || ang >  max_FOV_- M_PI/2.0) 
+          continue;
 
         if(!(Zout(i,j)== 0 )) {  
           float pc_modulo = Zout(i,j);
@@ -632,7 +631,7 @@ void ConeDetection::camera_lidar_fusion(
     output_image_msg.is_bigendian = edited_image_msg->is_bigendian;
     output_image_msg.step = edited_image_msg->step;
     output_image_msg.data = edited_image_msg->data;
-    //pcOnimg_pub->publish(output_image_msg);
+    pcOnimg_pub->publish(output_image_msg);
 
     sensor_msgs::msg::PointCloud2 output;
     pcl::toROSMsg(*pc_color, output);

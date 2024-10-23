@@ -9,10 +9,14 @@
       # === Camera lidar fusion params ===
       maxlen: 50.0
       minlen: 0.02
-      max_FOV: 1.57
-      min_FOV: 0.01
-      angular_resolution_x: 0.06
-      angular_resolution_y: 0.06
+      max_FOV: 2.3554
+      min_FOV: 0.7854
+      angular_resolution_x: 0.17578125
+      angular_resolution_y: 0.3516
+      # Resolution for ouster sr1 64
+      # angular_resolution_x: 0.17578125  (for 90 deg)
+      # angular_resolution_y: 0.3516
+      # Points per rotate - 131072
       max_angle_width: 90.0
       max_angle_height: 22.5
       max_var: 100.0
