@@ -29,7 +29,7 @@
   "SensorType": 6,
   "Enabled": true,
   "X": -0.3, "Y": 0, "Z": 0.7,
-  "Roll": 0, "Pitch": 0, "Yaw" : 0,
+  "Roll": 0.0, "Pitch": 0.0, "Yaw" : 0.0,
   "NumberOfLasers": 64,
   "PointsPerScan": 32768,
   "RotationsPerSecond": 20,
@@ -69,9 +69,7 @@
   }
   ],
   "X": -0.3, "Y": 0, "Z": 0.8,
-  "Pitch": 0.0,
-  "Roll": 0.0,
-  "Yaw": 0
+  "Pitch": 0.0, "Roll": 0.0, "Yaw": 0.0
 },
           "cam2": {
             "CaptureSettings": [
