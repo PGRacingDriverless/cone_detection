@@ -59,10 +59,10 @@ private:
 
     std::vector<std::pair<std::string, cv::Rect>> camera_cones_detect(cv_bridge::CvImagePtr cv_image_ptr);
 
-    void camera_lidar_fusion( 
+    std::vector<std::pair<std::string, pcl::PointXYZRGB>> camera_lidar_fusion(        
         const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
-        const sensor_msgs::msg::Image::ConstSharedPtr &image_msg);
-
+        const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
+        const std::vector<std::pair<std::string, cv::Rect>> &detected_cones);
 
     // SYNC
     std::shared_ptr<Synchronizer<sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>> sync_;
@@ -71,7 +71,7 @@ private:
 
     rclcpp::Publisher<pathplanner_msgs::msg::ConeArray>::SharedPtr detected_cones_pub_;
 
-    std::string detected_cones_topic_ = "detected_cones";
+    std::string detected_cones_topic_ = "cone_array";
     std::string lidar_points_topic_;
     std::string camera_image_topic_;
     std::string frame_id_;
@@ -92,6 +92,9 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pcOnimg_pub;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pc_pub;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr range_image_pub_;
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_color;
+
     
     int marker_id_;
 
