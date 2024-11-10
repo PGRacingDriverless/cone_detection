@@ -19,6 +19,18 @@ This project is focused on detecting traffic cones using LIDAR data. The primary
 | Cmake                 | >=3.5          |
 | Eigen                 |                |
 | PCL                   |                |
+| Armadillo             | >=11.0.1       |
+
+Download: http://arma.sourceforge.net/download.html
+```bash
+tar -xvf armadillo-14.0.2.tar.xz
+cd armadillo-14.0.2
+mkdir build
+cd build
+cmake ..
+make
+sudo make install
+```
 
 ## Features
 - **Ground Plane Segmentation:** Uses RANSAC to remove ground points from the LIDAR data.
@@ -55,18 +67,33 @@ ros2 launch cone_detection cone_detection.launch.py
 Below is an example of a JSON configuration file that you might use to set the parameters for the FSDS lidar:
 ```json
 "Lidar1": {
-    "SensorType": 6,
-    "Enabled": true,
-    "X": 1.2, "Y": 0, "Z": 0.4,
-    "Roll": 0, "Pitch": 0, "Yaw" : 0,
-    "NumberOfLasers": 16,
-    "PointsPerScan": 10096,
-    "RotationsPerSecond": 20,
-    "VerticalFOVUpper": 2,
-    "VerticalFOVLower": -6,
-    "HorizontalFOVStart": -90,
-    "HorizontalFOVEnd": 90,
-    "DrawDebugPoints": false
+  "SensorType": 6,
+  "Enabled": true,
+  "X": 1.2, "Y": 0, "Z": 0.4,
+  "Roll": 0, "Pitch": 0, "Yaw" : 0,
+  "NumberOfLasers": 16,
+  "PointsPerScan": 10096,
+  "RotationsPerSecond": 20,
+  "VerticalFOVUpper": 2,
+  "VerticalFOVLower": -6,
+  "HorizontalFOVStart": -45,
+  "HorizontalFOVEnd": 45,
+  "DrawDebugPoints": false
+}
+
+"cam1": {
+  "CaptureSettings": [
+  {
+    "ImageType": 0,
+    "Width": 1280,
+    "Height": 1280,
+    "FOV_Degrees": 90
+  }
+  ],
+  "X": -0.3, "Y": 0, "Z": 0.8,
+  "Pitch": 0.0,
+  "Roll": 0.0,
+  "Yaw": 0
 }
 ```
 Parameters are roughly matched as for Velodyne VLP-16 lidar

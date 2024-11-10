@@ -2,55 +2,114 @@
 #define CONE_DETECTION_NODE_HPP_
 
 #include "rclcpp/rclcpp.hpp"
-#include "sensor_msgs/msg/point_cloud2.hpp"
+
+#include <Eigen/Dense>
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl/filters/passthrough.h>
-#include <pcl/segmentation/extract_clusters.h>
-#include <pcl/filters/extract_indices.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/filters/filter.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 
-#include <pcl/common/angles.h>
-#include <pcl/common/centroid.h>
+#include <pcl/range_image/range_image.h>
+#include <pcl/range_image/range_image_spherical.h>
+
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/image.hpp>
 
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <visualization_msgs/msg/marker.hpp>
-#include <geometry_msgs/msg/pose_array.hpp>
-#include <geometry_msgs/msg/pose.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/point.hpp>
 
 #include "cones/cone_array.hpp"
-#include "cones/cone_pair_array.hpp"
-#include "pathplanner_msgs/msg/cone_pair_array.hpp"
+#include "cones/cone.hpp"
+#include "pathplanner_msgs/msg/cone.hpp"
 #include "pathplanner_msgs/msg/cone_array.hpp"
 
-#include <pcl/kdtree/kdtree.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/synchronizer.h>
+#include "message_filters/time_synchronizer.h"
 
-#include <pcl/point_types.h>
+#include "model.hpp"
+#include <cv_bridge/cv_bridge.h>
+#include <rclcpp/qos.hpp>
+#include <image_transport/image_transport.hpp>
 
-using std::placeholders::_1;
+#include <opencv2/opencv.hpp>
+#include <cmath>
+#include <limits>
+#include <chrono>
+#include <armadillo>
 
-class ConeDetector : public rclcpp::Node {
+typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
+
+using namespace message_filters;
+
+class ConeDetection : public rclcpp::Node {
 public:
-    ConeDetector(const rclcpp::NodeOptions &node_options);
+    ConeDetection(const rclcpp::NodeOptions &node_options);
 
 private:
-    void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
-    void publishPose();
+    
+    void cone_detection_callback(
+        const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
+        const sensor_msgs::msg::Image::ConstSharedPtr &image_msg);
 
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_sub_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_pub_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pose_array_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
-    rclcpp::Publisher<pathplanner_msgs::msg::ConePairArray>::SharedPtr cone_pair_array_publisher_;
+    std::vector<std::pair<std::string, cv::Rect>> camera_cones_detect(cv_bridge::CvImagePtr cv_image_ptr);
 
+    std::vector<std::pair<std::string, pcl::PointXYZRGB>> camera_lidar_fusion(        
+        const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
+        const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
+        const std::vector<std::pair<std::string, cv::Rect>> &detected_cones);
+
+    // SYNC
+    std::shared_ptr<Synchronizer<sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>> sync_;
+    std::shared_ptr<Subscriber<sensor_msgs::msg::Image>> image_sub_;
+    std::shared_ptr<Subscriber<sensor_msgs::msg::PointCloud2>> pc2_sub_;        
+
+    rclcpp::Publisher<pathplanner_msgs::msg::ConeArray>::SharedPtr detected_cones_pub_;
+
+    std::string detected_cones_topic_ = "cone_array";
     std::string lidar_points_topic_;
+    std::string camera_image_topic_;
     std::string frame_id_;
-    double filter_min_;
-    double filter_max_;
 
+    std::shared_ptr<Model> model_;
+
+    // Camera-lidar fusion
+    cv_bridge::CvImagePtr cv_ptr, out_cv_ptr, color_pcl;
+    Eigen::MatrixXf Mc;  // camera calibration matrix
+    Eigen::MatrixXf Rlc; // rotation matrix lidar-camera
+    Eigen::MatrixXf Tlc; // translation matrix lidar-camera
+
+    bool debug_mode_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr detection_frames_publisher_;
+    std::string detection_frames_topic_ = "camera/image_detected";
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr markers_cones_publisher_;
+    std::string markers_cones_topic_ = "detected_cones_markers";
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pcOnimg_pub;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pc_pub;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr range_image_pub_;
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_color;
+
+    
+    int marker_id_;
+
+    // camera lidar fusion
+    float maxlen_;
+    float minlen_;
+    float max_FOV_;
+    float min_FOV_;
+    float angular_resolution_x_;
+    float angular_resolution_y_;
+    float max_angle_width_;
+    float max_angle_height_;
+    float max_var_;
+    float interpol_value_;
+    bool filter_pc_;
 };
 
 #endif // CONE_DETECTION_NODE_HPP_
