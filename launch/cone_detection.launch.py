@@ -18,7 +18,7 @@ def generate_launch_description():
 
     launch_rviz_arg = DeclareLaunchArgument(
         "rviz",
-        default_value="True",
+        default_value="False",
         description="Launch RViz2"
     )
    
