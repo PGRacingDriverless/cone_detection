@@ -30,7 +30,7 @@
 #include <utility>
 #include <vector>
 // Debug
-#ifdef NDEBUG
+#ifndef NDEBUG
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/quaternion.hpp>
@@ -154,7 +154,7 @@ private:
     rclcpp::Publisher<pathplanner_msgs::msg::ConeArray>::SharedPtr detected_cones_publisher_;
 
 // CMake macro for debug build
-#ifdef NDEBUG
+#ifndef NDEBUG
     std::string detection_frames_topic_ = "cone_detection/image_detected";
     /**
      * Publishes on the detection_frames_topic_ image with labeled and

@@ -134,7 +134,7 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
         this->create_publisher<pathplanner_msgs::msg::ConeArray>(detected_cones_topic_, 5);
 
 
-#ifdef NDEBUG
+#ifndef NDEBUG
     // Create publishers for debug
     detection_frames_publisher_ = 
         this->create_publisher<sensor_msgs::msg::Image>(detection_frames_topic_, 5);
@@ -171,8 +171,8 @@ void ConeDetection::cone_detection_callback(
     // Merge camera and lidar data and return closest points for each cone
     std::vector<std::pair<std::string, pcl::PointXYZRGB>> cone_positions = 
         lidar_camera_fusion(point_cloud_msg, image_msg, detected_cones);
-
-#ifdef NDEBUG
+    
+#ifndef NDEBUG
     int cone_marker_id_ = 0;
     auto cone_markers_array_msg = visualization_msgs::msg::MarkerArray();
 #endif
@@ -203,12 +203,12 @@ void ConeDetection::cone_detection_callback(
         // Add a cone to the cone_array in the message
         cone_array_msg.cone_array.push_back(cone_msg);
 
-#ifdef NDEBUG
+#ifndef NDEBUG
         // https://github.com/autowarefoundation/autoware.universe/blob/1e829e2948222e8b9c60a2af3bf3008ffbe2ec6d/common/tier4_autoware_utils/include/tier4_autoware_utils/geometry/geometry.hpp#L42
         geometry_msgs::msg::Point point;
         point.x = cone_msg.x;
         point.y = cone_msg.y;
-        point.z = 0.2;
+        point.z = 0.1;
         geometry_msgs::msg::Quaternion quaternion;
         quaternion.x = 0.0;
         quaternion.y = 0.0;
@@ -237,21 +237,20 @@ void ConeDetection::cone_detection_callback(
             cone_marker_msg.color.g = 0.0;
             cone_marker_msg.color.b = 1.0;
         } else if (cone_msg.side == 1) {
-            cone_marker_msg.color.r = 0.5;
-            cone_marker_msg.color.g = 1.0;
-            cone_marker_msg.color.b = 0.55;
+            cone_marker_msg.color.r = 0.96;
+            cone_marker_msg.color.g = 0.94;
+            cone_marker_msg.color.b = 0.06;
         }
         cone_marker_msg.color.a = 1.0;
         cone_marker_msg.lifetime = 
-            rclcpp::Duration(std::chrono::milliseconds(0));
+            rclcpp::Duration(std::chrono::milliseconds(1));
         cone_marker_msg.frame_locked = false;
-        
         // Push cone marker to cone markers array
         cone_markers_array_msg.markers.push_back(cone_marker_msg);
 #endif
     }
 
-#ifdef NDEBUG
+#ifndef NDEBUG
     // Convert CV image to ROS msg
     std::shared_ptr<sensor_msgs::msg::Image> edited_img_msg = 
         cv_image_ptr->toImageMsg();
@@ -287,7 +286,7 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::camera_cones_detect
             std::string(model_->get_class_by_id(result.class_id)),
             result.box
         ));
-#ifdef NDEBUG
+#ifndef NDEBUG
         // Choose the color
         cv::Scalar color(0, 256, 0);
 
@@ -444,8 +443,8 @@ std::vector<std::pair<std::string, pcl::PointXYZRGB>> ConeDetection::lidar_camer
         }
 
         double distance = std::sqrt(closest_point.x * closest_point.x + closest_point.y * closest_point.y);
-        
-        if (distance < (params_.max_len - 5.0))
+
+        if (distance < (params_.max_len - 2.0))
             closest_points.push_back(std::make_pair(pair.first, closest_point));
     }
 

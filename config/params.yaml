@@ -6,17 +6,18 @@
         # Model params
         model_path: "/home/ros/ws/src/cone_detection/models/fullDatasetYolov8n1280.onnx"
         classes: [
-            "seg_blue_cone",
-            "seg_large_orange_cone",
-            "seg_orange_cone",
-            "seg_unknown_cone",
-            "seg_yellow_cone",
-            "blue_cone",
-            "large_orange_cone",
-            "orange_cone",
-            "unknown_cone",
-            "yellow_cone"
+            "seg_orange_cone", 
+            "unknown_cone", 
+            "yellow_cone", 
+            "seg_large_orange_cone", 
+            "seg_blue_cone", 
+            "seg_unknown_cone", 
+            "seg_yellow_cone", 
+            "blue_cone", 
+            "orange_cone", 
+            "large_orange_cone"
         ]
+        
         width: 1280
         height: 1280
         iou_threshold: 0.5
