@@ -7,10 +7,19 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 
 def generate_launch_description():
+    # Cone detection
     params_file_path = os.path.join(
         get_package_share_directory("cone_detection"),
         "config",
         "params.yaml"
+    )
+
+    cone_detection_node = Node(
+        executable="cone_detection_node",
+        package="cone_detection",
+        name="cone_detection_node",
+        parameters = [params_file_path],
+        output="screen"
     )
 
     # RViz2
@@ -24,7 +33,7 @@ def generate_launch_description():
    
     rviz_config_path = os.path.join(
         get_package_share_directory("cone_detection"),
-        "rviz",
+        "config",
         "config.rviz"
     )
 
@@ -36,15 +45,6 @@ def generate_launch_description():
         output="screen",
         # A string will be considered True if it matches 'true' or '1'.
         condition=IfCondition(launch_rviz)
-    )
-
-    
-    cone_detection_node = Node(
-        executable="cone_detection_node",
-        package="cone_detection",
-        name="cone_detection_node",
-        parameters = [params_file_path],
-        output="screen"
     )
 
     # Launch description

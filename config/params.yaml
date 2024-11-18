@@ -1,67 +1,48 @@
 /cone_detection_node:
     ros__parameters:
-      hui: true
-      filter_min: -0.38
-      filter_max: 3.0
-      lidar_points_topic: "/lidar/Lidar1"
-      camera_image_topic: "/fsds/cam1/image_color"
-
-      # === Camera lidar fusion params ===
-      maxlen: 30.0
-      minlen: 0.01
-      max_FOV: 2.3554
-      min_FOV: 0.7854
-      angular_resolution_x: 0.17578125
-      angular_resolution_y: 0.3516
-      # Resolution for ouster sr1 64
-      # angular_resolution_x: 0.17578125  (for 90 deg)
-      # angular_resolution_y: 0.3516
-      # Points per rotate - 131072
-      max_angle_width: 90.0
-      max_angle_height: 22.5
-      max_var: 50.0
-      interpol_value: 20.0
-      filter_pc: true
-
-      frame_id: "/fsds/Lidar1"
-
-      # === Model params ===
-      model_path: "/home/ros/ws/src/camera/models/fullDatasetYolov8n1280.onnx"
-      classes: ["seg_orange_cone", "unknown_cone", "yellow_cone", "seg_large_orange_cone", "seg_blue_cone", "seg_unknown_cone", "seg_yellow_cone", "blue_cone", "orange_cone", "large_orange_cone"] # "/home/ros/ws/src/camera/models/classes.txt"
-      # model_type: 1
-      width: 1280  # imgSize[0]
-      height: 1280 # imgSize[1]
-      iou_threshold: 0.5
-      rect_confidence_threshold: 0.4
-      # === Session options ===
-      cuda_enable: true
-      # Note: Log severity level. See:
-      # https://github.com/microsoft/onnxruntime/blob/main/include/onnxruntime/core/common/logging/severity.h
-      log_severity_level: 3
-      intra_op_num_threads: 1
-
-      # TESTING ONLY, OTHERWISE IT MUST BE false
-      # enable visualization topics for rviz and debug info in console
-      debug_mode: true
-
-      # Camera matrix 
-      camera_matrix: [640.0000,   0.000000,   640.0000, 0.000000,
-                      0.000000,   640.0000,   640.0000, 0.000000,
-                      0.000000,   0.000000,   1.000000, 0.000000]
-
-      # Rotation matrix depends on camera rotation regarding lidar
-      rlc:  [1.0 , 0.0  ,0.0,  
-             0.0 , 1.0  ,0.0,  
-             0.0 , 0.0  ,1.0 ]
-
-      # Translation matrix (y, z, x) depends on camera position regarding lidar
-      tlc: [ 0.0, 0.1, 0.0]
-
-      # SIMILATION PARAMETERS EXAMPLE
-      #camera_matrix: [640.0000,   0.000000,   640.0000, 0.000000,
-      #                0.000000,   640.0000,   640.0000, 0.000000,
-      #                0.000000,   0.000000,   1.000000, 0.000000]
-      #rlc:  [1.0 , 0.0  ,0.0,  
-      #       0.0 , 1.0  ,0.0,  
-      #       0.0 , 0.0  ,1.0 ]
-      #tlc: [ 1.5, 0.0, -0.4]
+        # Topic names
+        lidar_points_topic: "/lidar/Lidar1"
+        camera_image_topic: "/fsds/cam1/image_color"
+        # Model params
+        model_path: "/home/ros/ws/src/cone_detection/models/fullDatasetYolov8n1280.onnx"
+        classes: [
+            "seg_blue_cone",
+            "seg_large_orange_cone",
+            "seg_orange_cone",
+            "seg_unknown_cone",
+            "seg_yellow_cone",
+            "blue_cone",
+            "large_orange_cone",
+            "orange_cone",
+            "unknown_cone",
+            "yellow_cone"
+        ]
+        width: 1280
+        height: 1280
+        iou_threshold: 0.5
+        rect_confidence_threshold: 0.4
+        cuda_enable: true
+        log_severity_level: 3
+        intra_op_num_threads: 1
+        # Lidar-Camera fusion params
+        # | Ouster OS1-64: 131072 point/rotate,
+        # | ang_res_x: 0.17578125 (for 90 deg), ang_res_y: 0.3516
+        max_len: 30.0
+        min_len: 0.01
+        max_fov: 2.3554
+        min_fov: 0.7854
+        ang_res_x: 0.17578125
+        ang_res_y: 0.3516
+        # Lidar-Camera fusion matrices
+        camera_matrix: [
+            640.0, 0.0  , 640.0, 0.0,
+            0.0  , 640.0, 640.0, 0.0,
+            0.0  , 0.0  , 1.0  , 0.0
+        ]
+        rotation_matrix: [
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0
+        ]
+        # | translation_matrix: [ 1.5, 0.0, -0.4]
+        translation_matrix: [ 0.0, 0.1, 0.0]
