@@ -1,20 +1,18 @@
 #include "cone_detection/model.hpp"
 
+// Just the constructor.
 Model::Model() {}
 
-Model::~Model()
-{
+// Clear the memory allocated for the session.
+Model::~Model() {
     delete session_;
 }
 
-bool Model::init(const SessionOptions& options, const ModelParams& params)
-{
-    try
-    {
+bool Model::init(const SessionOptions& options, const ModelParams& params) {
+    try {
         // Set options used to construct session
         Ort::SessionOptions session_options;
-        if (options.cuda_enable)
-        {
+        if (options.cuda_enable) {
             // And for CUDA if enabled
             OrtCUDAProviderOptions cuda_options;
             cuda_options.device_id = 0;
@@ -40,19 +38,16 @@ bool Model::init(const SessionOptions& options, const ModelParams& params)
 
         return true;
     }
-    catch (const std::exception& e)
-    {
+    catch (const std::exception& e) {
         RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Model: %s", e.what());
         return false;
     }
 }
 
-std::vector<ModelResult> Model::detect(const cv::Mat& img)
-{
+std::vector<ModelResult> Model::detect(const cv::Mat& img) {
     std::vector<ModelResult> res{};
 
-    try
-    {
+    try {
         // Preprocess image
         cv::Mat processed_img = letterboxing(img);
         
@@ -66,26 +61,21 @@ std::vector<ModelResult> Model::detect(const cv::Mat& img)
 
         res = process_output_tensors(output_tensors);
     }
-    catch (const std::exception& e)
-    {
+    catch (const std::exception& e) {
         RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Model: %s", e.what());
     }
 
     return res;
 }
 
-void Model::blob_from_image(const cv::Mat& img, float*& blob)
-{
+void Model::blob_from_image(const cv::Mat& img, float*& blob) {
     int channels = img.channels();
     int height = img.rows;
     int width = img.cols;
 
-    for (int c = 0; c < channels; c++)
-    {
-        for (int h = 0; h < height; h++)
-        {
-            for (int w = 0; w < width; w++)
-            {
+    for (int c = 0; c < channels; c++) {
+        for (int h = 0; h < height; h++) {
+            for (int w = 0; w < width; w++) {
                 blob[c * width * height + h * width + w] =
                     (img.at<cv::Vec3b>(h, w)[c]) / 255.0f;
             }
@@ -93,8 +83,7 @@ void Model::blob_from_image(const cv::Mat& img, float*& blob)
     }
 }
 
-std::vector<Ort::Value> Model::create_tensor_and_run(float*& blob)
-{
+std::vector<Ort::Value> Model::create_tensor_and_run(float*& blob) {
     // Create a vector of tensor dimensions of the input node
     std::vector<int64_t> input_node_dims =
         { 1, 3, params_.img_size.at(0), params_.img_size.at(1) };
@@ -121,8 +110,7 @@ std::vector<Ort::Value> Model::create_tensor_and_run(float*& blob)
     return output_tensors;
 }
 
-void Model::get_node_names()
-{
+void Model::get_node_names() {
     // Memory allocator with default options
     Ort::AllocatorWithDefaultOptions allocator;
 
@@ -131,20 +119,18 @@ void Model::get_node_names()
     size_t output_nodes_num = session_->GetOutputCount();
 
     // Get input node names
-    for (size_t node_num = 0; node_num < input_nodes_num; node_num++)
-    {
+    for (size_t node_num = 0; node_num < input_nodes_num; node_num++) {
         Ort::AllocatedStringPtr input_node_name =
             session_->GetInputNameAllocated(node_num, allocator);
         // input_node_names_.push_back(input_node_name.get());
-        /** @todo Idk why it works in such way */
+        /** @todo Idk why it works in such way. */
         char* temp_buf = new char[50];
         strcpy(temp_buf, input_node_name.get());
         input_node_names_.push_back(temp_buf);
     }
 
     // Get output node names
-    for (size_t node_num = 0; node_num < output_nodes_num; node_num++)
-    {
+    for (size_t node_num = 0; node_num < output_nodes_num; node_num++) {
         Ort::AllocatedStringPtr output_node_name =
             session_->GetOutputNameAllocated(node_num, allocator);
         // output_node_names_.push_back(output_node_name.get());
@@ -154,24 +140,20 @@ void Model::get_node_names()
     }
 }
 
-cv::Mat Model::letterboxing(const cv::Mat& img)
-{
+cv::Mat Model::letterboxing(const cv::Mat& img) {
     cv::Mat res_img;
 
     // Convert to RGB color space
-    if (img.channels() == 3)
-    {
+    if (img.channels() == 3) {
         res_img = img.clone();
         cv::cvtColor(res_img, res_img, cv::COLOR_BGR2RGB);
     }
-    else
-    {
+    else {
         cv::cvtColor(img, res_img, cv::COLOR_GRAY2RGB);
     }
 
     // Letter-boxing itself
-    if (img.cols >= img.rows)
-    {
+    if (img.cols >= img.rows) {
         resize_scale_ = img.cols / (float)params_.img_size.at(0);
         cv::resize(
             res_img,
@@ -179,8 +161,7 @@ cv::Mat Model::letterboxing(const cv::Mat& img)
             cv::Size(params_.img_size.at(0), int(img.rows / resize_scale_))
         );
     }
-    else
-    {
+    else {
         resize_scale_ = img.rows / (float)params_.img_size.at(1);
         cv::resize(
             res_img,
@@ -200,8 +181,7 @@ cv::Mat Model::letterboxing(const cv::Mat& img)
 
 std::vector<ModelResult> Model::process_output_tensors(
     std::vector<Ort::Value>& output_tensors
-) const
-{
+) const {
     // Get the type and shape of output tensors
     Ort::TypeInfo type_info = output_tensors.front().GetTypeInfo();
     auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
@@ -220,25 +200,22 @@ std::vector<ModelResult> Model::process_output_tensors(
     std::vector<cv::Rect> boxes;
     
     cv::Mat raw_data = cv::Mat(stride_num, signal_result_num, CV_32F, output);
-    
-    //Note:
-    //ultralytics add transpose operator to the output of yolov8 model.which make yolov8/v5/v7 has same shape
-    //https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt
-    //rowData = rowData.t();
-
+    /**
+     * @note Ultralytics add transpose operator to the output of yolov8
+     * model.which make yolov8/v5/v7 has same shape.
+     * @see https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt
+     */
     raw_data = raw_data.t(); // added
     float* data = (float*)raw_data.data;
 
     // strideNum -> signalResultNum
-    for (int i = 0; i < signal_result_num; ++i)
-    {
+    for (int i = 0; i < signal_result_num; ++i) {
         float* classes_scores = data + 4;
         cv::Mat scores(1, params_.classes.size(), CV_32FC1, classes_scores);
         cv::Point class_id;
         double max_class_score;
         cv::minMaxLoc(scores, 0, &max_class_score, 0, &class_id);
-        if (max_class_score > params_.rect_confidence_threshold)
-        {
+        if (max_class_score > params_.rect_confidence_threshold) {
             confidences.push_back(max_class_score);
             class_ids.push_back(class_id.x);
             float x = data[0];
@@ -270,8 +247,7 @@ std::vector<ModelResult> Model::process_output_tensors(
     
     std::vector<ModelResult> results{};
 
-    for (size_t i = 0; i < nms_res.size(); ++i)
-    {
+    for (size_t i = 0; i < nms_res.size(); ++i) {
         int idx = nms_res[i];
         ModelResult res;
         res.class_id = class_ids[idx];
@@ -283,8 +259,7 @@ std::vector<ModelResult> Model::process_output_tensors(
     return results;
 }
 
-void Model::warm_up()
-{
+void Model::warm_up() {
     // Create "image" of our sizes with 3 channels
     cv::Mat img =
         cv::Mat(cv::Size(params_.img_size.at(0), params_.img_size.at(1)), CV_8UC3);
@@ -300,7 +275,6 @@ void Model::warm_up()
     delete[] blob;
 }
 
-std::string Model::get_class_by_id(int class_id)
-{
+std::string Model::get_class_by_id(int class_id) {
     return params_.classes[class_id];
 }
