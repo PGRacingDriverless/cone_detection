@@ -1,37 +1,39 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>cone_detection</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="vadzim.shy@gmail.com">ros</maintainer>
-  <license>TODO: License declaration</license>
+    <name>cone_detection</name>
+    <version>0.0.1</version>
+    <description>Cone detection with camera-lidar fusion</description>
+    <maintainer email="pgracing.team@gmail.com">PGRacing Team</maintainer>
+    <license>MIT</license>
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
+    <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>rclcpp</depend>
-  <depend>rclcpp_components</depend>
-  <depend>pcl_conversions</depend>
-  <depend>pcl_ros</depend>
-  <depend>cv_bridge</depend>
-  <depend>cone_pair_array</depend>
+    <!-- Dependencies -->
+    <depend>cv_bridge</depend>
+    <depend>eigen_conversions</depend>
+    <depend>image_transport</depend>
+    <depend>pcl_conversions</depend>
+    <depend>pcl_ros</depend>
+    <depend>rclcpp</depend>
+    <depend>rclcpp_components</depend>
+    <depend>tf2_eigen</depend>
+    <!-- Custom dependencies -->
+    <depend>cone_pair_array</depend>
 
-  <depend>tf2_eigen</depend>
-  <depend>eigen_conversions</depend>
-  <depend>image_transport</depend>
+    <depend>message_filters</depend>
+    <!-- Messages -->
+    <depend>geometry_msgs</depend>
+    <depend>sensor_msgs</depend>
+    <depend>std_msgs</depend>
+    <depend>visualization_msgs</depend>
+    <!-- Custom messages -->
+    <depend>pathplanner_msgs</depend>
 
-  <depend>sensor_msgs</depend>
-  <depend>std_msgs</depend>
-  <depend>geometry_msgs</depend>
-  <depend>visualization_msgs</depend>
-  <depend>pathplanner_msgs</depend>
-  <depend>message_filters</depend>
+    <test_depend>ament_lint_auto</test_depend>
+    <test_depend>ament_lint_common</test_depend>
 
-  <exec_depend>launch_ros</exec_depend>
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
-
-  <export>
-    <build_type>ament_cmake</build_type>
-  </export>
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
 </package>
