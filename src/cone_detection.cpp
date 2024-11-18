@@ -169,7 +169,7 @@ void ConeDetection::cone_detection_callback(
     std::vector<std::pair<std::string, cv::Rect>> detected_cones = 
         camera_cones_detect(cv_image_ptr);
     // Merge camera and lidar data and return closest points for each cone
-    std::vector<std::pair<std::string, pcl::PointXYZRGB>> cone_positions = 
+    std::vector<std::pair<std::string, pcl::PointXYZ>> cone_positions = 
         lidar_camera_fusion(point_cloud_msg, image_msg, detected_cones);
     
 #ifndef NDEBUG
@@ -180,7 +180,7 @@ void ConeDetection::cone_detection_callback(
     auto cone_array_msg = pathplanner_msgs::msg::ConeArray();
 
     for (const auto& pair : cone_positions) {
-        pcl::PointXYZRGB cone_closest_point = pair.second;
+        pcl::PointXYZ cone_closest_point = pair.second;
 
         // Creating cone msg
         auto cone_msg = pathplanner_msgs::msg::Cone();
@@ -208,7 +208,7 @@ void ConeDetection::cone_detection_callback(
         geometry_msgs::msg::Point point;
         point.x = cone_msg.x;
         point.y = cone_msg.y;
-        point.z = 0.1;
+        point.z = -0.3;
         geometry_msgs::msg::Quaternion quaternion;
         quaternion.x = 0.0;
         quaternion.y = 0.0;
@@ -243,7 +243,7 @@ void ConeDetection::cone_detection_callback(
         }
         cone_marker_msg.color.a = 1.0;
         cone_marker_msg.lifetime = 
-            rclcpp::Duration(std::chrono::milliseconds(1));
+            rclcpp::Duration(std::chrono::milliseconds(500));
         cone_marker_msg.frame_locked = false;
         // Push cone marker to cone markers array
         cone_markers_array_msg.markers.push_back(cone_marker_msg);
@@ -335,13 +335,13 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::camera_cones_detect
     return detected_cones;
 }
 
-std::vector<std::pair<std::string, pcl::PointXYZRGB>> ConeDetection::lidar_camera_fusion(        
+std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_fusion(        
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
     const std::vector<std::pair<std::string, cv::Rect>> &detected_cones
 ) {
     // The closest point to each cone
-    std::vector<std::pair<std::string, pcl::PointXYZRGB>> closest_points;
+    std::vector<std::pair<std::string, pcl::PointXYZ>> closest_points;
 
 
     // Convert ROS image_msg to CV image
@@ -402,28 +402,32 @@ std::vector<std::pair<std::string, pcl::PointXYZRGB>> ConeDetection::lidar_camer
     Eigen::MatrixXf point_cloud_matrix(4, 1);
     uint px_data, py_data;
 
-    // Iterate over each detected cone and find the closest point
-    for (const auto& pair : detected_cones) {
-        // Get the center of each cone box (cv::Rect)
-        int center_x = pair.second.x + pair.second.width / 2;
-        int center_y = pair.second.y + pair.second.height / 2;
+    //auto start = std::chrono::high_resolution_clock::now();
 
-        pcl::PointXYZRGB closest_point;
-        double min_distance = std::numeric_limits<double>::max();
+    // Store closest point and min distance for each cone
+    std::vector<std::pair<pcl::PointXYZ, double>> cone_closest_points(detected_cones.size(),
+        {pcl::PointXYZ(), std::numeric_limits<double>::max()});
 
-        // Loop over all the points in the filtered point cloud
-        for (const auto& point : point_cloud_filtered->points) {
-            // Transform point from LiDAR to Camera
-            point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
-            lidar_camera = camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
+    // Loop over all the points in the filtered point cloud
+    for (const auto& point : point_cloud_filtered->points) {
+        // Transform point from LiDAR to Camera
+        point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
+        lidar_camera = camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
 
-            // Project 3D point to image plane
-            px_data = static_cast<int>(lidar_camera(0, 0) / lidar_camera(2, 0));
-            py_data = static_cast<int>(lidar_camera(1, 0) / lidar_camera(2, 0));
+        // Project 3D point to image plane
+        px_data = static_cast<int>(lidar_camera(0, 0) / lidar_camera(2, 0));
+        py_data = static_cast<int>(lidar_camera(1, 0) / lidar_camera(2, 0));
 
-            // Skip points outside of image bounds
-            if (px_data >= image_msg->width || py_data >= image_msg->height)
-                continue;
+        // Skip points outside of image bounds
+        if (px_data >= image_msg->width || py_data >= image_msg->height)
+            continue;
+    
+        // Iterate over each detected cone and find the closest point
+        for (size_t idx = 0; idx < detected_cones.size(); ++idx) {
+            const auto& pair = detected_cones[idx];
+            // Get the center of each cone box (cv::Rect)
+            int center_x = pair.second.x + pair.second.width / 2;
+            int center_y = pair.second.y + pair.second.height / 2;
 
             // Calculate the distance to the center of the cone
             double distance_to_center = std::sqrt(
@@ -431,22 +435,27 @@ std::vector<std::pair<std::string, pcl::PointXYZRGB>> ConeDetection::lidar_camer
             );
 
             // Find the closest point
-            if (distance_to_center < min_distance) {
-                min_distance = distance_to_center;
-                closest_point.x = point.x;
-                closest_point.y = point.y;
-                closest_point.z = point.z;
-                closest_point.r = cv_image_ptr->image.at<cv::Vec3b>(py_data, px_data)[2];
-                closest_point.g = cv_image_ptr->image.at<cv::Vec3b>(py_data, px_data)[1];
-                closest_point.b = cv_image_ptr->image.at<cv::Vec3b>(py_data, px_data)[0];
+            if (distance_to_center < cone_closest_points[idx].second) {
+                cone_closest_points[idx] = {point, distance_to_center};
             }
         }
+    }
 
+    // Write closest points for return
+    for (size_t i = 0; i < cone_closest_points.size(); ++i) {
+        const auto& closest_point = cone_closest_points[i].first;
         double distance = std::sqrt(closest_point.x * closest_point.x + closest_point.y * closest_point.y);
 
-        if (distance < (params_.max_len - 2.0))
-            closest_points.push_back(std::make_pair(pair.first, closest_point));
+        if (distance < (params_.max_len - 4.0)) {
+            std::string cone_id = detected_cones[i].first;
+            closest_points.push_back(std::make_pair(cone_id, closest_point));
+        }
     }
+
+
+    //auto end = std::chrono::high_resolution_clock::now();
+    //auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    //std::cout << "Execution time: " << duration.count() << " microseconds  size: " << closest_points.size() << std::endl;
 
     return closest_points;
 }

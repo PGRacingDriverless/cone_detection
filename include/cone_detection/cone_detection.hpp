@@ -102,10 +102,10 @@ private:
      * @param detected_cones vector of pairs of cone class name and cone
      * box (`cv::Rect`) received from `camera_cones_detect()`.
      * @return vector of pairs of cone class name and cone closest point
-     * (`pcl::PointXYZRGB`).
+     * (`pcl::PointXYZ`).
      * @todo Add interpolation to increase the number of points and accuracy.
      */
-    std::vector<std::pair<std::string, pcl::PointXYZRGB>> lidar_camera_fusion(
+    std::vector<std::pair<std::string, pcl::PointXYZ>> lidar_camera_fusion(
         const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
         const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
         const std::vector<std::pair<std::string, cv::Rect>> &detected_cones
