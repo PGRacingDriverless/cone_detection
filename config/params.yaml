@@ -4,7 +4,7 @@
         lidar_points_topic: "/lidar/Lidar1"
         camera_image_topic: "/fsds/cam1/image_color"
         # Model params
-        model_path: "/home/ros/ws/src/cone_detection/models/fullDatasetYolov8n1280.onnx"
+        model_path: "/home/ros/ws/src/cone_detection/models/Yolov8n1280.onnx"
         classes: [
             "seg_orange_cone", 
             "unknown_cone", 
