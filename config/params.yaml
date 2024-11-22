@@ -17,7 +17,6 @@
             "orange_cone", 
             "large_orange_cone"
         ]
-        
         width: 1280
         height: 1280
         iou_threshold: 0.5
@@ -34,6 +33,8 @@
         min_fov: 0.7854
         ang_res_x: 0.17578125
         ang_res_y: 0.3516
+        max_ang_w: 90.0
+        max_ang_h: 22.5
         # Lidar-Camera fusion matrices
         camera_matrix: [
             640.0, 0.0  , 640.0, 0.0,

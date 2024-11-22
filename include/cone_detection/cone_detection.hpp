@@ -12,6 +12,11 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
+// Range image
+#include <pcl/range_image/range_image_spherical.h>
+#include <pcl/range_image/range_image.h>
+// Interpolation
+#include <armadillo>
 // Synchronization of messages from camera and lidar
 #include <rclcpp/qos.hpp>
 #include <message_filters/subscriber.h>
@@ -26,6 +31,7 @@
 #include "model.hpp"
 // Standard
 #include <limits>
+#include <math.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -51,6 +57,8 @@
  * @param min_fov Minimum field of view Not used now. For interpolation.
  * @param ang_res_x Angular resolution x. Not used now. For interpolation.
  * @param ang_res_y Angular resolution y. Not used now. For interpolation.
+ * @param max_ang_w Maximum angle width. Not used now. For interpolation.
+ * @param max_ang_h Maximum angle height. Not used now. For interpolation.
  */
 typedef struct {
     float max_len;
@@ -59,6 +67,8 @@ typedef struct {
     float min_fov;
     float ang_res_x;
     float ang_res_y;
+    float max_ang_w;
+    float max_ang_h;
 } FusionParams;
 
 /**
@@ -155,17 +165,14 @@ private:
 
 // CMake macro for debug build
 #ifndef NDEBUG
-    std::string detection_frames_topic_ = "cone_detection/image_detected";
-    /**
-     * Publishes on the detection_frames_topic_ image with labeled and
-     * boxed detected cones.
-     */
+    /** Publishes image with labeled and boxed detected cones. */
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr detection_frames_publisher_;
-    std::string cone_markers_topic_ = "cone_detection/cone_markers";
-    /** Publishes on the cone_markers_topic_ markers for visualization. */
+    /** Publishes markers for visualization. */
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr cone_markers_publisher_;
-    /** Publishes fusion point cloud. */
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr fusion_point_cloud_publisher_;
+    /** Publishes filtered point cloud. */
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_point_cloud_publisher_;
+    /** Publishes interpolated point cloud. */
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr interp_point_cloud_publisher_;
     /** Publishes range image. */
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr range_img_publisher_;
     /** Publishes a point cloud from overlaid on the camera image. */
