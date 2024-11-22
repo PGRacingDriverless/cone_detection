@@ -14,13 +14,14 @@ The package, using the pre-trained model, detects cones in the images coming fro
 | Dependency            | Version        |
 | --------------------- | -------------- |
 | C++ Standard          | >=17           |
-| Cmake                 | >=3.5          |
-| OpenCV                | >=4.0.0        |
+| Cmake                 | >=3.8          |
+| OpenCV                | >=4.9          |
 | ONNX Runtime          | >=1.18.1       |
 | YOLO model            | >=8.1 \<9      |
 | Cuda (Optional)       | >=12.4 \<=12.5 |
 | cuDNN (Cuda required) | =9             |
-| PCL                   |                |
+| PCL                   | x              |
+| Eigen3                | x              |
 
 ## Build and Run
 Build:
