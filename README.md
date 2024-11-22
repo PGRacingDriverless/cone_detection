@@ -44,5 +44,12 @@ ros2 launch cone_detection cone_detection.launch.py
 | --------- | ---------- | ------------------------------ |
 | rviz      | bool       | Runs with RViz2                |
 
+### Models
+| Model            | Description                                                     | mAP50 | Speed |
+|------------------|-----------------------------------------------------------------|-------|-------|
+| Yolov8n1280.onnx | Base model, the fastest of the current lineup (n = nano).       | 0.763 | 2.8ms |
+| Yolov8s1280.onnx | Bigger model (focusing on accurracy over performance).          | 0.799 | 5.1ms |
+| Yolov8n1920.onnx | The most accurate model, however it compromises on performance. | 0.829 | 6.1ms |
+
 ## License
 This project is under an MIT license.
