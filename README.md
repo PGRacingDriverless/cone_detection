@@ -2,6 +2,7 @@
 - [Overview](#Overview)
 - [Requirements](#Requirements)
 - [Build and Run](#Build-and-Run)
+- [Models](#Models)
 - [License](#License)
 
 ## Overview
@@ -44,7 +45,7 @@ ros2 launch cone_detection cone_detection.launch.py
 | --------- | ---------- | ------------------------------ |
 | rviz      | bool       | Runs with RViz2                |
 
-### Models
+## Models
 | Model            | Description                                                     | mAP50 | Speed |
 |------------------|-----------------------------------------------------------------|-------|-------|
 | Yolov8n1280.onnx | Base model, the fastest of the current lineup (n = nano).       | 0.763 | 2.8ms |
