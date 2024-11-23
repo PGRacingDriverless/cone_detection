@@ -39,6 +39,7 @@ find_package(pathplanner_msgs REQUIRED)
 find_package(PCL REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV 4.9 REQUIRED)
+find_package(Armadillo 14.0.2 REQUIRED)
 
 if(BUILD_TESTING)
     find_package(ament_lint_auto REQUIRED)
@@ -56,6 +57,7 @@ endif()
 set(ONNXRUNTIME_LIB ${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so)
 
 include_directories(include
+    ${ARMADILLO_INCLUDE_DIRS}
     ${ONNXRUNTIME_ROOT}/include
     ${OpenCV_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
@@ -75,6 +77,7 @@ rclcpp_components_register_node(
 )
 
 target_link_libraries(${PROJECT_NAME}
+    ${ARMADILLO_LIBRARIES}
     ${ONNXRUNTIME_LIB}
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}

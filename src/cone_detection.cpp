@@ -102,24 +102,19 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     camera_matrix_ << (double)temp_matrix_vec[0], (double)temp_matrix_vec[1], (double)temp_matrix_vec[2], (double)temp_matrix_vec[3],
                       (double)temp_matrix_vec[4], (double)temp_matrix_vec[5], (double)temp_matrix_vec[6], (double)temp_matrix_vec[7],
                       (double)temp_matrix_vec[8], (double)temp_matrix_vec[9], (double)temp_matrix_vec[10], (double)temp_matrix_vec[11];
-    // camera_matrix_(Eigen::Map<const double*>(temp_matrix_vec.data(), 3, 4));
-    // camera_matrix_ = Eigen::Map<Eigen::Matrix<double, 3, 4> >(temp_matrix_vec.data());
     temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("rotation_matrix");
     rotation_matrix_.resize(3,3);
     rotation_matrix_ << (double)temp_matrix_vec[0], (double)temp_matrix_vec[1], (double)temp_matrix_vec[2],
                         (double)temp_matrix_vec[3], (double)temp_matrix_vec[4], (double)temp_matrix_vec[5],
                         (double)temp_matrix_vec[6], (double)temp_matrix_vec[7], (double)temp_matrix_vec[8];
-    // rotation_matrix_(Eigen::Map<const double*>(temp_matrix_vec.data(), 3, 3));
-    // rotation_matrix_ = Eigen::Map<Eigen::Matrix<double, 3, 3> >(temp_matrix_vec.data());
     temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("translation_matrix");
     translation_matrix_.resize(3,1);
     translation_matrix_ << (double)temp_matrix_vec[0],
                            (double)temp_matrix_vec[1],
                            (double)temp_matrix_vec[2];
-    // translation_matrix_(Eigen::Map<const double*>(temp_matrix_vec.data(), 3, 1));
-    // translation_matrix_ = Eigen::Map<Eigen::Matrix<double, 3, 1> >(temp_matrix_vec.data());
+    
     // Create transformation matrix
     transformation_matrix_.resize(4,4);
     transformation_matrix_ <<
@@ -144,7 +139,9 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     interp_point_cloud_publisher_ = 
         this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/interp_point_cloud", 5);
     range_img_publisher_ = 
-        this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/range_image", 5);
+        this->create_publisher<sensor_msgs::msg::Image>("cone_detection/range_image", 5);
+    range_img_cloud_publisher_ = 
+        this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/range_image_cloud", 5);
     point_cloud_on_img_publisher_ = 
         this->create_publisher<sensor_msgs::msg::Image>("cone_detection/point_cloud_on_img", 5);
 #endif
@@ -253,21 +250,9 @@ void ConeDetection::cone_detection_callback(
     }
 
 #ifndef NDEBUG
-    // Convert CV image to ROS msg
-    std::shared_ptr<sensor_msgs::msg::Image> edited_img_msg = 
-        cv_image_ptr->toImageMsg();
-    // Create output msg and assigning values from edited msg pointer to it 
-    sensor_msgs::msg::Image output_img_msg;
-    output_img_msg.header = edited_img_msg->header;
-    output_img_msg.height = edited_img_msg->height;
-    output_img_msg.width = edited_img_msg->width;
-    output_img_msg.encoding = edited_img_msg->encoding;
-    output_img_msg.is_bigendian = edited_img_msg->is_bigendian;
-    output_img_msg.step = edited_img_msg->step;
-    output_img_msg.data = edited_img_msg->data;
-
-    // Publish image message with detected cones (labels and boxes)
-    detection_frames_publisher_->publish(output_img_msg);
+    // Convert CV image to ROS msg and publish image message with
+    // detected cones (labels and boxes)
+    detection_frames_publisher_->publish(*cv_image_ptr->toImageMsg());
     // Publish cone markers for visualization
     cone_markers_publisher_->publish(cone_markers_array_msg);
 #endif
@@ -598,7 +583,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         { pcl::PointXYZ(), std::numeric_limits<double>::max() }
     );
 
-    // Loop over all the points in the filtered point cloud
+    // Loop over all the points in the interpolated point cloud
     for (const auto& point : interp_point_cloud->points) {
         // Transform point from LiDAR to Camera
         point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
@@ -611,6 +596,23 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         // Skip points outside of image bounds
         if (px_data >= image_msg->width || py_data >= image_msg->height)
             continue;
+        
+#ifndef NDEBUG
+        int x_color = (int)(255 * ((point.x) / params_.max_len));
+        int z_color = (int)(255 * ((point.x) / 10.0));
+
+        if(z_color > 255) {
+            z_color = 255;
+        }
+
+        cv::circle(
+            cv_image_ptr->image,
+            cv::Point(px_data, py_data),
+            1,
+            CV_RGB(255 - x_color, (int)(z_color), x_color),
+            cv::FILLED
+        );
+#endif
     
         // Iterate over each detected cone and find the closest point
         for (size_t idx = 0; idx < detected_cones.size(); ++idx) {
@@ -656,7 +658,30 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     temp_cloud.data.clear();
     pcl::toROSMsg(*interp_point_cloud, temp_cloud);
     temp_cloud.header = point_cloud_msg->header;
-    range_img_publisher_->publish(temp_cloud);
+    interp_point_cloud_publisher_->publish(temp_cloud);
+
+    // cv::Mat range_img_cv(range_img->height, range_img->width, CV_8UC1);
+    // for(int i = 0; i < range_img->height; ++i) {
+    //     for (int j = 0; j < range_img->width; ++j) {
+    //         float range = range_img->getPoint(i, j).range;
+    //         range_img_cv.at<float>(i, j) = range;
+    //         // if(std::isfinite(range)) {
+    //         //     range_img_cv.at<float>(y, x) = range;
+    //         // } else {
+    //         //     range_img_cv.at<float>(y, x) = 0.0f;
+    //         // }
+    //     }
+    // }
+    // cv::normalize(range_img_cv, range_img_cv, 0, 255, cv::NORM_MINMAX);
+    // range_img_cv.convertTo(range_img_cv, CV_8UC1);
+    // sensor_msgs::msg::Image::SharedPtr range_img_msg = 
+    //     cv_bridge::CvImage(image_msg->header, "mono8", range_img_cv).toImageMsg();
+    // range_img_publisher_->publish(*range_img_msg);
+
+    temp_cloud.data.clear();
+    // range_img_cloud_publisher_->publish(temp_cloud);
+
+    point_cloud_on_img_publisher_->publish(*cv_image_ptr->toImageMsg());
 #endif
 
     return closest_points;

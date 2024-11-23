@@ -21,7 +21,6 @@
     <depend>std_msgs</depend>
     <depend>visualization_msgs</depend>
     <depend>cv_bridge</depend>
-    <depend>opencv2</depend>
     <depend>pathplanner_msgs</depend>
 
     <exec_depend>ament_index_python</exec_depend>

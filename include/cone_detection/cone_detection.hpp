@@ -53,12 +53,13 @@
  * this distance are filtered out.
  * @param min_len Minimum distance for the point cloud. Points closer than
  * this distance are filtered out.
- * @param max_fov Maximum field of view. Not used now. For interpolation.
- * @param min_fov Minimum field of view Not used now. For interpolation.
- * @param ang_res_x Angular resolution x. Not used now. For interpolation.
- * @param ang_res_y Angular resolution y. Not used now. For interpolation.
- * @param max_ang_w Maximum angle width. Not used now. For interpolation.
- * @param max_ang_h Maximum angle height. Not used now. For interpolation.
+ * @param max_fov Maximum field of view. For interpolation.
+ * @param min_fov Minimum field of view For interpolation.
+ * @param ang_res_x Angular resolution x. For interpolation.
+ * @param ang_res_y Angular resolution y. For interpolation.
+ * @param max_ang_w Maximum angle width. For interpolation.
+ * @param max_ang_h Maximum angle height. For interpolation.
+ * @todo Describe all params.
  */
 typedef struct {
     float max_len;
@@ -174,7 +175,9 @@ private:
     /** Publishes interpolated point cloud. */
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr interp_point_cloud_publisher_;
     /** Publishes range image. */
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr range_img_publisher_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr range_img_publisher_;
+    /** Publishes point cloud from range image. */
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr range_img_cloud_publisher_;
     /** Publishes a point cloud from overlaid on the camera image. */
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr point_cloud_on_img_publisher_;
 #endif
