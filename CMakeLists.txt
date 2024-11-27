@@ -36,7 +36,7 @@ include_directories(${ONNXRUNTIME_ROOT}/include)
 set(ONNXRUNTIME_LIB ${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so)
 
 # OpenCV
-find_package(OpenCV 4.9 REQUIRED)
+find_package(OpenCV 4.5 REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 # PCL
 find_package(PCL REQUIRED)
