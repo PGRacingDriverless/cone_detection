@@ -12,6 +12,9 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/filters/passthrough.h>
 // Range image
 #include <pcl/range_image/range_image_spherical.h>
 #include <pcl/range_image/range_image.h>
@@ -107,6 +110,29 @@ private:
     );
 
     /**
+     * Filter point cloud before interpolation
+     */
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filterPointCloudBeforeInterpolation(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud);
+
+    /**
+     * Filter range matrix after interpolation
+     */
+    arma::mat filterInterpolatedData(
+        const arma::mat &range_matrix_interp);
+
+    /**
+     * Interpolate point cloud using range image
+     * @param range_img `RangeImageSpherical` after convert on point cloud
+     * @param range_matrix_interp `arma::mat` OUTPUT matrix of interpolated range values
+     * @param height_matrix_interp `arma::mat` OUTPUT matrix of interpolated Z axis values
+     */
+    void interpolateRangeImage(
+        const pcl::RangeImageSpherical::Ptr &range_img,
+        arma::mat &range_matrix, arma::mat &height_matrix,
+        arma::mat &range_matrix_interp, arma::mat &height_matrix_interp);
+
+    /**
      * Finds the closest point of the cone relative to the lidar.
      * @param point_cloud_msg `PointCloud2` from lidar.
      * @param image_msg `Image` from camera.
@@ -163,6 +189,9 @@ private:
      * ConeArray messages from pathplanner_msgs.
      */
     rclcpp::Publisher<pathplanner_msgs::msg::ConeArray>::SharedPtr detected_cones_publisher_;
+
+    // I love this
+    float interp_value = 10.0;
 
 // CMake macro for debug build
 #ifndef NDEBUG

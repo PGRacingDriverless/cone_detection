@@ -59,8 +59,8 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     params.classes = 
         this->declare_parameter<std::vector<std::string>>("classes");
     params.img_size = {
-        this->declare_parameter<int>("width"),
-        this->declare_parameter<int>("height")
+        (int)this->declare_parameter<int>("width"),
+        (int)this->declare_parameter<int>("height")
     };
     params.iou_threshold = this->declare_parameter<float>("iou_threshold");
     params.rect_confidence_threshold = 
@@ -322,6 +322,178 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::camera_cones_detect
     return detected_cones;
 }
 
+pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::filterPointCloudBeforeInterpolation(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud) 
+{
+    // Create a new cloud to store the filtered points
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+
+    // Remove NaN points from the input point cloud
+    std::vector<int> indices;
+    pcl::removeNaNFromPointCloud(*point_cloud, *filtered_point_cloud, indices);
+
+    // Filter points based on distance (keeping points within a specified range)
+    pcl::PointCloud<pcl::PointXYZ>::Ptr distance_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+    for (const auto& point : filtered_point_cloud->points) {
+        // Calculate the distance from the origin (x, y plane)
+        double distance = std::sqrt(point.x * point.x + point.y * point.y);
+        // Keep points that are within the specified distance range
+        if (distance >= params_.min_len && distance <= params_.max_len) {
+            distance_filtered->push_back(point);
+        }
+    }
+
+//     // Remove ground (flat plane) from the point cloud using RANSAC
+//     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_no_ground(new pcl::PointCloud<pcl::PointXYZ>);
+
+//     // Create the SAC segmentation object for ground plane extraction
+//     pcl::SACSegmentation<pcl::PointXYZ> seg;
+//     seg.setOptimizeCoefficients(true);
+//     seg.setModelType(pcl::SACMODEL_PLANE); // We are looking for a plane model
+//     seg.setMethodType(pcl::SAC_RANSAC);    // Use RANSAC algorithm for robust fitting
+//     seg.setDistanceThreshold(0.05);         // Maximum distance from the plane for a point to be considered part of it
+
+//     // Create an object to hold the indices of the ground points (inliers)
+//     pcl::PointIndices::Ptr inlier_indices(new pcl::PointIndices);
+//     pcl::ModelCoefficients::Ptr model_coefficients(new pcl::ModelCoefficients); // Coefficients of the plane model
+
+//     // Set the input cloud for segmentation
+//     seg.setInputCloud(distance_filtered);
+//     // Apply segmentation to obtain the indices of the ground points
+//     seg.segment(*inlier_indices, *model_coefficients);
+
+//     // If no plane is found, return the cloud without removing anything
+//     if (inlier_indices->indices.size() == 0) {
+//         PCL_ERROR("Ground plane not found.\n");
+//         return distance_filtered; // Return the cloud as is
+//     }
+
+//     // Extract the points that are not part of the ground (remove inliers)
+//     pcl::ExtractIndices<pcl::PointXYZ> extract;
+//     extract.setInputCloud(distance_filtered);
+//     extract.setIndices(inlier_indices);
+//     extract.setNegative(true); // Set to true to remove the ground points
+//     extract.filter(*cloud_no_ground);
+    
+//     // Return the point cloud after removing the ground
+//     return cloud_no_ground;
+    return distance_filtered;
+}
+
+void ConeDetection::interpolateRangeImage(
+    const pcl::RangeImageSpherical::Ptr &range_img,
+    arma::mat &range_matrix, arma::mat &height_matrix,
+    arma::mat &range_matrix_interp, arma::mat &height_matrix_interp) 
+{
+    // Get the dimensions of the image
+    int img_cols = range_img->width;
+    int img_rows = range_img->height;
+
+    range_matrix.zeros(img_rows, img_cols);
+    height_matrix.zeros(img_rows, img_cols);
+
+    for (int i = 0; i < img_cols; ++i) {
+        for (int j = 0; j < img_rows; ++j) {
+            float range = range_img->getPoint(i, j).range;
+            float height = range_img->getPoint(i, j).z;
+
+            if (
+                std::isinf(range) ||
+                range < params_.min_len ||
+                range > params_.max_len ||
+                std::isnan(height)
+            ) {
+                continue;
+            }
+
+            range_matrix.at(j, i) = range;   
+            height_matrix.at(j, i) = height;
+        }
+    }
+
+    // Horizontal spacing of the range image (i.e., the column indices)
+    arma::vec x_spacing = arma::regspace(1, range_matrix.n_cols);
+    // Vertical spacing of the range image (i.e., the row indices)
+    arma::vec y_spacing = arma::regspace(1, range_matrix.n_rows);
+
+    // Magnify by approximately 2
+    arma::vec x_spacing_scaled = 
+        arma::regspace(x_spacing.min(), 1.0, x_spacing.max());
+    //
+    arma::vec y_spacing_scaled = arma::regspace(
+        y_spacing.min(), 1.0 / interp_value, y_spacing.max()
+    );
+
+    arma::interp2(
+        x_spacing, y_spacing,
+        range_matrix,
+        x_spacing_scaled, y_spacing_scaled,
+        range_matrix_interp, "lineal"
+    );
+    arma::interp2(
+        x_spacing, y_spacing,
+        height_matrix,
+        x_spacing_scaled, y_spacing_scaled,
+        height_matrix_interp, "lineal"
+    );
+}
+
+arma::mat ConeDetection::filterInterpolatedData(
+    const arma::mat &range_matrix_interp) 
+{
+    arma::mat range_matrix_out = range_matrix_interp;
+
+    // Filtering of elements interpolated with the background
+    for(int i = 0; i < (int)range_matrix_interp.n_rows; ++i) {
+        for(int j = 0; j < (int)range_matrix_interp.n_cols ; ++j) {
+            if(range_matrix_interp(i, j) == 0) {
+                if(i + interp_value < range_matrix_interp.n_rows) {
+                    for(int k = 1; k <= interp_value; ++k) {
+                        range_matrix_out(i + k, j) = 0;
+                    }
+                }
+                if(i > interp_value) {
+                    for (int k = 1; k <= interp_value; ++k) {
+                        range_matrix_out(i - k, j) = 0;
+                    }
+                }
+            }
+        }
+    }    
+
+    double max_var = 50.0;
+
+    // Variance filtering
+    for(int i = 0; i < ((range_matrix_interp.n_rows - 1) / interp_value); ++i) {
+        for(int j = 0; j < (int)range_matrix_interp.n_cols; ++j) {
+            double avg = 0;
+            double variance = 0;
+
+            for(int k = 0; k < interp_value ; ++k) {
+                avg = avg + range_matrix_interp((i * interp_value) + k, j);
+            }
+            
+            avg = avg / interp_value;
+
+            for(int k = 0; k < interp_value; ++k) {
+                variance = variance + pow(
+                    range_matrix_interp((i * interp_value) + k, j) - avg,
+                    2.0
+                );
+            }
+
+            if(variance > max_var) {
+                for(int k = 0; k < interp_value; ++k) {
+                    range_matrix_out((i * interp_value) + k, j) = 0;
+                }
+            }
+        }
+    }
+
+    return range_matrix_out;
+}
+
+
 std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_fusion(        
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
@@ -358,20 +530,8 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         return closest_points;
     }
 
-    // Pre-process the point cloud
-    std::vector<int> indices;
-    pcl::removeNaNFromPointCloud(*point_cloud, *point_cloud, indices);
-
-    // Filter points based on distance
-    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud(
-        new pcl::PointCloud<pcl::PointXYZ>
-    );
-    for (const auto& point : point_cloud->points) {
-        double distance = std::sqrt(point.x * point.x + point.y * point.y);
-
-        if (distance >= params_.min_len && distance <= params_.max_len)
-            filtered_point_cloud->push_back(point);
-    }
+    // Before interpolation filtering
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud = filterPointCloudBeforeInterpolation(point_cloud);
 
     // Check if the filtered point cloud empty
     if (filtered_point_cloud->empty()) {
@@ -402,120 +562,15 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     );
     
 
-    // Get the dimensions of the image
-    int img_cols = range_img->width;
-    int img_rows = range_img->height;
-
-    // The range image
-    arma::mat range_matrix;
-    // Height values mapped onto the range image
-    arma::mat height_matrix;
-
-    range_matrix.zeros(img_rows, img_cols);
-    height_matrix.zeros(img_rows, img_cols);
-
-    for (int i = 0; i < img_cols; ++i) {
-        for (int j = 0; j < img_rows; ++j) {
-            float range = range_img->getPoint(i, j).range;
-            float height = range_img->getPoint(i, j).z;
-
-            if (
-                std::isinf(range) ||
-                range < params_.min_len ||
-                range > params_.max_len ||
-                std::isnan(height)
-            ) {
-                continue;
-            }
-
-            range_matrix.at(j, i) = range;   
-            height_matrix.at(j, i) = height;
-        }
-    }
-
-
     // Interpolation
+    // The range image
+    // Height values mapped onto the range image
+    arma::mat range_matrix, height_matrix, range_matrix_interp, height_matrix_interp;
+    interpolateRangeImage(range_img, range_matrix, height_matrix, range_matrix_interp, height_matrix_interp);
 
-    // Horizontal spacing of the range image (i.e., the column indices)
-    arma::vec x_spacing = arma::regspace(1, range_matrix.n_cols);
-    // Vertical spacing of the range image (i.e., the row indices)
-    arma::vec y_spacing = arma::regspace(1, range_matrix.n_rows);
 
-    float interp_value = 10.0;
-    // Magnify by approximately 2
-    arma::vec x_spacing_scaled = 
-        arma::regspace(x_spacing.min(), 1.0, x_spacing.max());
-    //
-    arma::vec y_spacing_scaled = arma::regspace(
-        y_spacing.min(), 1.0 / interp_value, y_spacing.max()
-    );
-
-    arma::mat range_matrix_interp;
-    arma::mat height_matrix_interp;
-
-    arma::interp2(
-        x_spacing, y_spacing,
-        range_matrix,
-        x_spacing_scaled, y_spacing_scaled,
-        range_matrix_interp, "lineal"
-    );
-    arma::interp2(
-        x_spacing, y_spacing,
-        height_matrix,
-        x_spacing_scaled, y_spacing_scaled,
-        height_matrix_interp, "lineal"
-    );
-
-    arma::mat range_matrix_out = range_matrix_interp;
-
-    // Filtering of elements interpolated with the background
-    for(int i = 0; i < range_matrix_interp.n_rows; ++i) {
-        for(int j = 0; j < range_matrix_interp.n_cols ; ++j) {
-            if(range_matrix_interp(i, j) == 0) {
-                if(i + interp_value < range_matrix_interp.n_rows) {
-                    for(int k = 1; k <= interp_value; ++k) {
-                        range_matrix_out(i + k, j) = 0;
-                    }
-                }
-                if(i > interp_value) {
-                    for (int k = 1; k <= interp_value; ++k) {
-                        range_matrix_out(i - k, j) = 0;
-                    }
-                }
-            }
-        }
-    }    
-
-    double max_var = 50.0;
-
-    // Variance filtering
-    for(int i = 0; i < ((range_matrix_interp.n_rows - 1) / interp_value); ++i) {
-        for(int j = 0; j < (range_matrix_interp.n_cols); ++j) {
-            double avg = 0;
-            double variance = 0;
-
-            for(int k = 0; k < interp_value ; ++k) {
-                avg = avg + range_matrix_interp((i * interp_value) + k, j);
-            }
-            
-            avg = avg / interp_value;
-
-            for(int k = 0; k < interp_value; ++k) {
-                variance = variance + pow(
-                    range_matrix_interp((i * interp_value) + k, j) - avg,
-                    2.0
-                );
-            }
-
-            if(variance > max_var) {
-                for(int k = 0; k < interp_value; ++k) {
-                    range_matrix_out((i * interp_value) + k, j) = 0;
-                }
-            }
-        }
-
-        range_matrix_interp = range_matrix_out;
-    }
+    // Filtering after interpolation
+    arma::mat range_matrix_out = filterInterpolatedData(range_matrix_interp);
 
 
     // Point cloud reconstruction from range image
@@ -532,7 +587,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     int num_pc = 0;
 
     for(int i = 0; i < range_matrix_interp.n_rows - interp_value; ++i) {
-        for(int j = 0; j < range_matrix_interp.n_cols; ++j) {
+        for(int j = 0; j < (int)range_matrix_interp.n_cols; ++j) {
             float ang = params_.min_fov + 
                 ((params_.max_fov - params_.min_fov) * j) / (range_matrix_interp.n_cols);
 
@@ -570,6 +625,37 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         }
     }
 
+    // Remove ground (flat plane) from the point cloud using RANSAC
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_no_ground(new pcl::PointCloud<pcl::PointXYZ>);
+
+    // Create the SAC segmentation object for ground plane extraction
+    pcl::SACSegmentation<pcl::PointXYZ> seg;
+    seg.setOptimizeCoefficients(true);
+    seg.setModelType(pcl::SACMODEL_PLANE); // We are looking for a plane model
+    seg.setMethodType(pcl::SAC_RANSAC);    // Use RANSAC algorithm for robust fitting
+    seg.setDistanceThreshold(0.05);         // Maximum distance from the plane for a point to be considered part of it
+
+    // Create an object to hold the indices of the ground points (inliers)
+    pcl::PointIndices::Ptr inlier_indices(new pcl::PointIndices);
+    pcl::ModelCoefficients::Ptr model_coefficients(new pcl::ModelCoefficients); // Coefficients of the plane model
+
+    // Set the input cloud for segmentation
+    seg.setInputCloud(interp_point_cloud);
+    // Apply segmentation to obtain the indices of the ground points
+    seg.segment(*inlier_indices, *model_coefficients);
+
+    // If no plane is found, return the cloud without removing anything
+    if (inlier_indices->indices.size() == 0) {
+        PCL_ERROR("Ground plane not found.\n");
+    }
+
+    // Extract the points that are not part of the ground (remove inliers)
+    pcl::ExtractIndices<pcl::PointXYZ> extract;
+    extract.setInputCloud(interp_point_cloud);
+    extract.setIndices(inlier_indices);
+    extract.setNegative(true); // Set to true to remove the ground points
+    extract.filter(*cloud_no_ground);
+    
 
     Eigen::MatrixXf lidar_camera(3, 1);
     Eigen::MatrixXf point_cloud_matrix(4, 1);
@@ -584,7 +670,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     );
 
     // Loop over all the points in the interpolated point cloud
-    for (const auto& point : interp_point_cloud->points) {
+    for (const auto& point : cloud_no_ground->points) {
         // Transform point from LiDAR to Camera
         point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
         lidar_camera = camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
@@ -656,7 +742,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     filtered_point_cloud_publisher_->publish(temp_cloud);
 
     temp_cloud.data.clear();
-    pcl::toROSMsg(*interp_point_cloud, temp_cloud);
+    pcl::toROSMsg(*cloud_no_ground, temp_cloud);
     temp_cloud.header = point_cloud_msg->header;
     interp_point_cloud_publisher_->publish(temp_cloud);
 
