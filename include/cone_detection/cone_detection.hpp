@@ -34,7 +34,7 @@
 #include "model.hpp"
 // Standard
 #include <limits>
-#include <math.h>
+#include <cmath>
 #include <string>
 #include <utility>
 #include <vector>
@@ -62,6 +62,8 @@
  * @param ang_res_y Angular resolution y. For interpolation.
  * @param max_ang_w Maximum angle width. For interpolation.
  * @param max_ang_h Maximum angle height. For interpolation.
+ * @param interp_value For interpolation.
+ * @param max_var Maximum variance for variance filtering.
  * @todo Describe all params.
  */
 typedef struct {
@@ -73,6 +75,8 @@ typedef struct {
     float ang_res_y;
     float max_ang_w;
     float max_ang_h;
+    float interp_value;
+    float max_var;
 } FusionParams;
 
 /**
@@ -107,6 +111,14 @@ private:
      */
     std::vector<std::pair<std::string, cv::Rect>> camera_cones_detect(
         cv_bridge::CvImagePtr cv_image_ptr
+    );
+
+    /**
+     * Filter cones by `cv::Rect` box height in pixels.
+     * @param detected_cones
+     */
+    void filter_by_px_height(
+        std::vector<std::pair<std::string, cv::Rect>> &detected_cones
     );
 
     /**
@@ -147,6 +159,8 @@ private:
         const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
         const std::vector<std::pair<std::string, cv::Rect>> &detected_cones
     );
+
+    int h_pixel;
 
     /** Lidar point cloud topic name. Can be changed in `params.yaml`. */
     std::string lidar_points_topic_;
@@ -189,9 +203,6 @@ private:
      * ConeArray messages from pathplanner_msgs.
      */
     rclcpp::Publisher<pathplanner_msgs::msg::ConeArray>::SharedPtr detected_cones_publisher_;
-
-    // I love this
-    float interp_value = 10.0;
 
 // CMake macro for debug build
 #ifndef NDEBUG

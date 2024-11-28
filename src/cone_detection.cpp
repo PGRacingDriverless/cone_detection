@@ -94,6 +94,8 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     params_.ang_res_y = this->declare_parameter<float>("ang_res_y");
     params_.max_ang_w = this->declare_parameter<float>("max_ang_w");
     params_.max_ang_h = this->declare_parameter<float>("max_ang_h");
+    params_.interp_value = this->declare_parameter<float>("interp_value");
+    params_.max_var = this->declare_parameter<float>("max_var");
 
     // Read and set matrices for lidar-camera fusion
     std::vector<double> temp_matrix_vec = 
@@ -122,6 +124,14 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
         rotation_matrix_(1), rotation_matrix_(4), rotation_matrix_(7), translation_matrix_(1),
         rotation_matrix_(2), rotation_matrix_(5), rotation_matrix_(8), translation_matrix_(2),
         0                  , 0                  , 0                  , 1;
+
+
+    // Calculate height threshold in pixels for distance filtering
+    // distance = height_real * focal_length / height_pixel
+    float h_cone = 0.35;
+    h_pixel = static_cast<int>(std::ceil(
+        (h_cone * camera_matrix_.coeff(1, 1)) / params_.max_len
+    ));
 
 
     // Create publisher for detected_cones_topic_ with queue size of 5
@@ -167,8 +177,8 @@ void ConeDetection::cone_detection_callback(
     // Detect cones
     std::vector<std::pair<std::string, cv::Rect>> detected_cones = 
         camera_cones_detect(cv_image_ptr);
+    filter_by_px_height(detected_cones);
     // Merge camera and lidar data and return closest points for each cone
-
     std::vector<std::pair<std::string, pcl::PointXYZ>> cone_positions = 
         lidar_camera_fusion(point_cloud_msg, image_msg, detected_cones);
 
@@ -322,6 +332,20 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::camera_cones_detect
     return detected_cones;
 }
 
+void ConeDetection::filter_by_px_height(
+    std::vector<std::pair<std::string, cv::Rect>> &detected_cones
+) {
+    std::vector<std::pair<std::string, cv::Rect>> filtered_cones;
+    
+    for(const auto& cone : detected_cones) {
+        if(cone.second.height >= h_pixel) {
+            filtered_cones.push_back(cone);
+        }
+    }
+
+    detected_cones = filtered_cones;
+}
+
 pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::filterPointCloudBeforeInterpolation(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud) 
 {
@@ -421,7 +445,7 @@ void ConeDetection::interpolateRangeImage(
         arma::regspace(x_spacing.min(), 1.0, x_spacing.max());
     //
     arma::vec y_spacing_scaled = arma::regspace(
-        y_spacing.min(), 1.0 / interp_value, y_spacing.max()
+        y_spacing.min(), 1.0 / params_.interp_value, y_spacing.max()
     );
 
     arma::interp2(
@@ -447,44 +471,42 @@ arma::mat ConeDetection::filterInterpolatedData(
     for(int i = 0; i < (int)range_matrix_interp.n_rows; ++i) {
         for(int j = 0; j < (int)range_matrix_interp.n_cols ; ++j) {
             if(range_matrix_interp(i, j) == 0) {
-                if(i + interp_value < range_matrix_interp.n_rows) {
-                    for(int k = 1; k <= interp_value; ++k) {
+                if(i + params_.interp_value < range_matrix_interp.n_rows) {
+                    for(int k = 1; k <= params_.interp_value; ++k) {
                         range_matrix_out(i + k, j) = 0;
                     }
                 }
-                if(i > interp_value) {
-                    for (int k = 1; k <= interp_value; ++k) {
+                if(i > params_.interp_value) {
+                    for (int k = 1; k <= params_.interp_value; ++k) {
                         range_matrix_out(i - k, j) = 0;
                     }
                 }
             }
         }
-    }    
-
-    double max_var = 50.0;
+    }
 
     // Variance filtering
-    for(int i = 0; i < ((range_matrix_interp.n_rows - 1) / interp_value); ++i) {
+    for(int i = 0; i < ((range_matrix_interp.n_rows - 1) / params_.interp_value); ++i) {
         for(int j = 0; j < (int)range_matrix_interp.n_cols; ++j) {
             double avg = 0;
             double variance = 0;
 
-            for(int k = 0; k < interp_value ; ++k) {
-                avg = avg + range_matrix_interp((i * interp_value) + k, j);
+            for(int k = 0; k < params_.interp_value ; ++k) {
+                avg = avg + range_matrix_interp((i * params_.interp_value) + k, j);
             }
             
-            avg = avg / interp_value;
+            avg = avg / params_.interp_value;
 
-            for(int k = 0; k < interp_value; ++k) {
+            for(int k = 0; k < params_.interp_value; ++k) {
                 variance = variance + pow(
-                    range_matrix_interp((i * interp_value) + k, j) - avg,
+                    range_matrix_interp((i * params_.interp_value) + k, j) - avg,
                     2.0
                 );
             }
 
-            if(variance > max_var) {
-                for(int k = 0; k < interp_value; ++k) {
-                    range_matrix_out((i * interp_value) + k, j) = 0;
+            if(variance > params_.max_var) {
+                for(int k = 0; k < params_.interp_value; ++k) {
+                    range_matrix_out((i * params_.interp_value) + k, j) = 0;
                 }
             }
         }
@@ -586,7 +608,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     // Range image to point cloud
     int num_pc = 0;
 
-    for(int i = 0; i < range_matrix_interp.n_rows - interp_value; ++i) {
+    for(int i = 0; i < range_matrix_interp.n_rows - params_.interp_value; ++i) {
         for(int j = 0; j < (int)range_matrix_interp.n_cols; ++j) {
             float ang = params_.min_fov + 
                 ((params_.max_fov - params_.min_fov) * j) / (range_matrix_interp.n_cols);
