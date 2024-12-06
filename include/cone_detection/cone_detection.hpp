@@ -49,6 +49,15 @@
 #include <chrono>
 #endif
 
+struct ConeInfo {
+    std::string id;
+    cv::Rect bbox;
+    std::vector<pcl::PointXYZ> associated_points;
+    pcl::PointXYZ average_point;
+    double confidence;
+};
+
+
 /**
  * Lidar-Camera fusion parameters. All parameters can be changed
  * in `params.yaml`.

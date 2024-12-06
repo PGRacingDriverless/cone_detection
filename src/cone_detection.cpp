@@ -524,6 +524,13 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     // The closest point to each cone
     std::vector<std::pair<std::string, pcl::PointXYZ>> closest_points;
 
+    std::vector<ConeInfo> cone_infos;
+    for (const auto& cone : detected_cones) {
+        ConeInfo info;
+        info.id = cone.first;
+        info.bbox = cone.second;
+        cone_infos.push_back(info);
+    }
 
     // Convert ROS image_msg to CV image
     cv_bridge::CvImagePtr cv_image_ptr;
@@ -722,35 +729,85 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         );
 #endif
     
-        // Iterate over each detected cone and find the closest point
-        for (size_t idx = 0; idx < detected_cones.size(); ++idx) {
-            const auto& pair = detected_cones[idx];
-            // Get the center of each cone box (cv::Rect)
-            int center_x = pair.second.x + pair.second.width / 2;
-            int center_y = pair.second.y + pair.second.height / 2;
+        for (auto& cone : cone_infos) {
+            cv::Rect search_area = cone.bbox;
+            search_area.x -= search_area.width / 2;
+            search_area.y -= search_area.height / 2;
+            search_area.width *= 2;
+            search_area.height *= 2;
 
-            // Calculate the distance to the center of the cone
-            double distance_to_center = std::sqrt(
-                std::pow(px_data - center_x, 2) + std::pow(py_data - center_y, 2)
-            );
-
-            // Find the closest point
-            if (distance_to_center < cone_closest_points[idx].second) {
-                cone_closest_points[idx] = {point, distance_to_center};
+            if (search_area.contains(cv::Point(px_data, py_data))) {
+                cone.associated_points.push_back(point);
             }
         }
     }
 
-    // Write closest points for return
-    for (size_t i = 0; i < cone_closest_points.size(); ++i) {
-        const auto& closest_point = cone_closest_points[i].first;
-        double distance = std::sqrt(closest_point.x * closest_point.x + closest_point.y * closest_point.y);
+    // for (auto& cone : cone_infos) {
+    //     if (cone.associated_points.empty()) continue;
 
-        if (distance < (params_.max_len - 4.0)) {
-            std::string cone_id = detected_cones[i].first;
-            closest_points.push_back(std::make_pair(cone_id, closest_point));
+    //     pcl::PointXYZ sum(0, 0, 0);
+    //     for (const auto& p : cone.associated_points) {
+    //         sum.x += p.x;
+    //         sum.y += p.y;
+    //         sum.z += p.z;
+    //     }
+    //     cone.average_point.x = sum.x / cone.associated_points.size();
+    //     cone.average_point.y = sum.y / cone.associated_points.size();
+    //     cone.average_point.z = sum.z / cone.associated_points.size();
+    //     cone.confidence = std::min(1.0, cone.associated_points.size() / 100.0);
+
+    //     if (cone.confidence > 0.5) {
+    //         closest_points.push_back(std::make_pair(cone.id, cone.average_point));
+    //     }
+    // }
+
+    for (auto& cone : cone_infos) {
+        if (cone.associated_points.empty()) continue;
+
+        pcl::PointXYZ sum(0, 0, 0);
+        double min_distance = std::numeric_limits<double>::max();
+        pcl::PointXYZ closest_point;
+
+        for (const auto& p : cone.associated_points) {
+            sum.x += p.x;
+            sum.y += p.y;
+            sum.z += p.z;
+
+            double distance = std::sqrt(
+                std::pow(p.x - cone.average_point.x, 2) +
+                std::pow(p.y - cone.average_point.y, 2) +
+                std::pow(p.z - cone.average_point.z, 2)
+            );
+
+            if (distance < min_distance) {
+                min_distance = distance;
+                closest_point = p;
+            }
+        }
+
+        cone.average_point.x = sum.x / cone.associated_points.size();
+        cone.average_point.y = sum.y / cone.associated_points.size();
+        cone.average_point.z = sum.z / cone.associated_points.size();
+
+        closest_points.push_back(std::make_pair(cone.id, closest_point));
+    }
+
+    for (size_t i = 0; i < closest_points.size(); ++i) {
+        for (size_t j = i + 1; j < closest_points.size(); ++j) {
+            double distance = std::sqrt(
+                std::pow(closest_points[i].second.x - closest_points[j].second.x, 2) +
+                std::pow(closest_points[i].second.y - closest_points[j].second.y, 2) +
+                std::pow(closest_points[i].second.z - closest_points[j].second.z, 2)
+            );
+
+            if (distance < 2.0) {
+                closest_points.erase(closest_points.begin() + j);
+                --i;
+                break;
+            }
         }
     }
+
 
     // auto end = std::chrono::high_resolution_clock::now();
     // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
