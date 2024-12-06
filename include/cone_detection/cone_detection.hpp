@@ -1,6 +1,9 @@
 #ifndef CONE_DETECTION_HPP
 #define CONE_DETECTION_HPP
 
+// show debug data in release and debug modes
+#undef NDEBUG
+
 #include <rclcpp/rclcpp.hpp>
 // Matrix manipulations
 #include <Eigen/Dense>
