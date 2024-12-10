@@ -58,6 +58,7 @@ set(ONNXRUNTIME_LIB ${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so)
 
 include_directories(include
     ${ARMADILLO_INCLUDE_DIRS}
+    ${EIGEN3_INCLUDE_DIR}
     ${ONNXRUNTIME_ROOT}/include
     ${OpenCV_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
@@ -81,6 +82,7 @@ target_link_libraries(${PROJECT_NAME}
     ${ONNXRUNTIME_LIB}
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
+    Eigen3::Eigen
 )
 
 ament_auto_package(
