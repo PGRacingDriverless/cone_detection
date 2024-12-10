@@ -2,6 +2,7 @@
 - [Overview](#Overview)
 - [Requirements](#Requirements)
 - [Build and Run](#Build-and-Run)
+- [Models](#Models)
 - [License](#License)
 
 ## Overview
@@ -14,13 +15,14 @@ The package, using the pre-trained model, detects cones in the images coming fro
 | Dependency            | Version        |
 | --------------------- | -------------- |
 | C++ Standard          | >=17           |
-| Cmake                 | >=3.5          |
-| OpenCV                | >=4.0.0        |
+| Cmake                 | >=3.8          |
+| OpenCV                | >=4.9          |
 | ONNX Runtime          | >=1.18.1       |
 | YOLO model            | >=8.1 \<9      |
 | Cuda (Optional)       | >=12.4 \<=12.5 |
 | cuDNN (Cuda required) | =9             |
-| PCL                   |                |
+| PCL                   | x              |
+| Eigen3                | x              |
 
 ## Build and Run
 Build:
@@ -43,8 +45,7 @@ ros2 launch cone_detection cone_detection.launch.py
 | --------- | ---------- | ------------------------------ |
 | rviz      | bool       | Runs with RViz2                |
 
-
-### Models
+## Models
 | Model            | Description                                                     | mAP50 | Speed |
 |------------------|-----------------------------------------------------------------|-------|-------|
 | Yolov8n1280.onnx | Base model, the fastest of the current lineup (n = nano).       | 0.763 | 2.8ms |

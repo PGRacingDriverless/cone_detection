@@ -9,7 +9,6 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     camera_image_topic_ = 
         this->declare_parameter<std::string>("camera_image_topic");
     
-
     // Synchronization of messages from lidar_points_topic_ and
     // camera_image_topic_
     
@@ -60,8 +59,8 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     params.classes = 
         this->declare_parameter<std::vector<std::string>>("classes");
     params.img_size = {
-        this->declare_parameter<int>("width"),
-        this->declare_parameter<int>("height")
+        (int)this->declare_parameter<int>("width"),
+        (int)this->declare_parameter<int>("height")
     };
     params.iou_threshold = this->declare_parameter<float>("iou_threshold");
     params.rect_confidence_threshold = 
@@ -93,7 +92,10 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     params_.min_fov = this->declare_parameter<float>("min_fov");
     params_.ang_res_x = this->declare_parameter<float>("ang_res_x");
     params_.ang_res_y = this->declare_parameter<float>("ang_res_y");
-
+    params_.max_ang_w = this->declare_parameter<float>("max_ang_w");
+    params_.max_ang_h = this->declare_parameter<float>("max_ang_h");
+    params_.interp_value = this->declare_parameter<float>("interp_value");
+    params_.max_var = this->declare_parameter<float>("max_var");
 
     // Read and set matrices for lidar-camera fusion
     std::vector<double> temp_matrix_vec = 
@@ -102,24 +104,19 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     camera_matrix_ << (double)temp_matrix_vec[0], (double)temp_matrix_vec[1], (double)temp_matrix_vec[2], (double)temp_matrix_vec[3],
                       (double)temp_matrix_vec[4], (double)temp_matrix_vec[5], (double)temp_matrix_vec[6], (double)temp_matrix_vec[7],
                       (double)temp_matrix_vec[8], (double)temp_matrix_vec[9], (double)temp_matrix_vec[10], (double)temp_matrix_vec[11];
-    // camera_matrix_(Eigen::Map<const double*>(temp_matrix_vec.data(), 3, 4));
-    // camera_matrix_ = Eigen::Map<Eigen::Matrix<double, 3, 4> >(temp_matrix_vec.data());
     temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("rotation_matrix");
     rotation_matrix_.resize(3,3);
     rotation_matrix_ << (double)temp_matrix_vec[0], (double)temp_matrix_vec[1], (double)temp_matrix_vec[2],
                         (double)temp_matrix_vec[3], (double)temp_matrix_vec[4], (double)temp_matrix_vec[5],
                         (double)temp_matrix_vec[6], (double)temp_matrix_vec[7], (double)temp_matrix_vec[8];
-    // rotation_matrix_(Eigen::Map<const double*>(temp_matrix_vec.data(), 3, 3));
-    // rotation_matrix_ = Eigen::Map<Eigen::Matrix<double, 3, 3> >(temp_matrix_vec.data());
     temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("translation_matrix");
     translation_matrix_.resize(3,1);
     translation_matrix_ << (double)temp_matrix_vec[0],
                            (double)temp_matrix_vec[1],
                            (double)temp_matrix_vec[2];
-    // translation_matrix_(Eigen::Map<const double*>(temp_matrix_vec.data(), 3, 1));
-    // translation_matrix_ = Eigen::Map<Eigen::Matrix<double, 3, 1> >(temp_matrix_vec.data());
+    
     // Create transformation matrix
     transformation_matrix_.resize(4,4);
     transformation_matrix_ <<
@@ -129,21 +126,32 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
         0                  , 0                  , 0                  , 1;
 
 
-    // Create publisher for detected_cones_topic_ with queue size of 5
-    detected_cones_publisher_ = 
-        this->create_publisher<pathplanner_msgs::msg::ConeArray>(detected_cones_topic_, 5);
+    // Calculate height threshold in pixels for distance filtering
+    // distance = height_real * focal_length / height_pixel
+    float cone_height = 0.35;
+    height_in_pixels = static_cast<int>(std::ceil(
+        (cone_height * camera_matrix_.coeff(1, 1)) / params_.max_len
+    ));
 
+
+    // Create publisher for detected cones with queue size of 5
+    detected_cones_publisher_ = 
+        this->create_publisher<common_msgs::msg::ConeArray>("cone_array", 5);
 
 #ifndef NDEBUG
     // Create publishers for debug
     detection_frames_publisher_ = 
-        this->create_publisher<sensor_msgs::msg::Image>(detection_frames_topic_, 5);
+        this->create_publisher<sensor_msgs::msg::Image>("cone_detection/image_detected", 5);
     cone_markers_publisher_ = 
-        this->create_publisher<visualization_msgs::msg::MarkerArray>(cone_markers_topic_, 5);
-    fusion_point_cloud_publisher_ = 
-        this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/fusion_point_cloud", 5);
+        this->create_publisher<visualization_msgs::msg::MarkerArray>("cone_detection/cone_markers", 5);
+    filtered_point_cloud_publisher_ = 
+        this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/filtered_point_cloud", 5);
+    interp_point_cloud_publisher_ = 
+        this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/interp_point_cloud", 5);
     range_img_publisher_ = 
-        this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/range_image", 5);
+        this->create_publisher<sensor_msgs::msg::Image>("cone_detection/range_image", 5);
+    range_img_cloud_publisher_ = 
+        this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/range_image_cloud", 5);
     point_cloud_on_img_publisher_ = 
         this->create_publisher<sensor_msgs::msg::Image>("cone_detection/point_cloud_on_img", 5);
 #endif
@@ -168,27 +176,28 @@ void ConeDetection::cone_detection_callback(
     // Detect cones
     std::vector<std::pair<std::string, cv::Rect>> detected_cones = 
         camera_cones_detect(cv_image_ptr);
+    // Filter detected cones
+    filter_by_px_height(detected_cones);
     // Merge camera and lidar data and return closest points for each cone
     std::vector<std::pair<std::string, pcl::PointXYZ>> cone_positions = 
         lidar_camera_fusion(point_cloud_msg, image_msg, detected_cones);
-    
+
 #ifndef NDEBUG
     int cone_marker_id_ = 0;
-    auto cone_markers_array_msg = visualization_msgs::msg::MarkerArray();
+    visualization_msgs::msg::MarkerArray cone_markers_array_msg;
 #endif
     // Creating message with detected cones for path planner
-    auto cone_array_msg = pathplanner_msgs::msg::ConeArray();
+    common_msgs::msg::ConeArray cone_array_msg;
 
     for (const auto& pair : cone_positions) {
         pcl::PointXYZ cone_closest_point = pair.second;
 
         // Creating cone msg
-        auto cone_msg = pathplanner_msgs::msg::Cone();
+        common_msgs::msg::Cone cone_msg;
         cone_msg.x = cone_closest_point.x;
         cone_msg.y = cone_closest_point.y;
+
         /**
-         * Blue - Outer - 0
-         * Yellow - Inner - 1
          * @todo Change the logic for detecting color. Yellow is not
          * always inner. Look at the Skid Pad.
          */
@@ -204,7 +213,6 @@ void ConeDetection::cone_detection_callback(
         cone_array_msg.cone_array.push_back(cone_msg);
 
 #ifndef NDEBUG
-        // https://github.com/autowarefoundation/autoware.universe/blob/1e829e2948222e8b9c60a2af3bf3008ffbe2ec6d/common/tier4_autoware_utils/include/tier4_autoware_utils/geometry/geometry.hpp#L42
         geometry_msgs::msg::Point point;
         point.x = cone_msg.x;
         point.y = cone_msg.y;
@@ -223,7 +231,7 @@ void ConeDetection::cone_detection_callback(
         vector3.z = 0.2;
 
         // Create cone marker message
-        auto cone_marker_msg = visualization_msgs::msg::Marker();
+        visualization_msgs::msg::Marker cone_marker_msg;
         cone_marker_msg.header.stamp = this->now();
         cone_marker_msg.header.frame_id = "/fsds/Lidar1";
         cone_marker_msg.ns = "basic_shapes";
@@ -251,21 +259,9 @@ void ConeDetection::cone_detection_callback(
     }
 
 #ifndef NDEBUG
-    // Convert CV image to ROS msg
-    std::shared_ptr<sensor_msgs::msg::Image> edited_img_msg = 
-        cv_image_ptr->toImageMsg();
-    // Create output msg and assigning values from edited msg pointer to it 
-    sensor_msgs::msg::Image output_img_msg;
-    output_img_msg.header = edited_img_msg->header;
-    output_img_msg.height = edited_img_msg->height;
-    output_img_msg.width = edited_img_msg->width;
-    output_img_msg.encoding = edited_img_msg->encoding;
-    output_img_msg.is_bigendian = edited_img_msg->is_bigendian;
-    output_img_msg.step = edited_img_msg->step;
-    output_img_msg.data = edited_img_msg->data;
-
-    // Publish image message with detected cones (labels and boxes)
-    detection_frames_publisher_->publish(output_img_msg);
+    // Convert CV image to ROS msg and publish image message with
+    // detected cones (labels and boxes)
+    detection_frames_publisher_->publish(*cv_image_ptr->toImageMsg());
     // Publish cone markers for visualization
     cone_markers_publisher_->publish(cone_markers_array_msg);
 #endif
@@ -335,6 +331,20 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::camera_cones_detect
     return detected_cones;
 }
 
+void ConeDetection::filter_by_px_height(
+    std::vector<std::pair<std::string, cv::Rect>> &detected_cones
+) {
+    std::vector<std::pair<std::string, cv::Rect>> filtered_cones;
+    
+    for(const auto& cone : detected_cones) {
+        if(cone.second.height >= height_in_pixels) {
+            filtered_cones.push_back(cone);
+        }
+    }
+
+    detected_cones = filtered_cones;
+}
+
 std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_fusion(        
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
@@ -343,6 +353,13 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     // The closest point to each cone
     std::vector<std::pair<std::string, pcl::PointXYZ>> closest_points;
 
+    std::vector<ConeInfo> cone_infos;
+    for (const auto& cone : detected_cones) {
+        ConeInfo info;
+        info.id = cone.first;
+        info.bbox = cone.second;
+        cone_infos.push_back(info);
+    }
 
     // Convert ROS image_msg to CV image
     cv_bridge::CvImagePtr cv_image_ptr;
@@ -362,11 +379,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     pcl::PointCloud<pcl::PointXYZ>::Ptr point_cloud(
         new pcl::PointCloud<pcl::PointXYZ>
     );
-    // From deprecated pcl::fromROSMsg
-    // https://docs.ros.org/en/hydro/api/pcl_conversions/html/pcl__conversions_8h_source.html#l00517
-    pcl::PCLPointCloud2 pcl_pc2;
-    pcl_conversions::toPCL(*point_cloud_msg, pcl_pc2);
-    pcl::fromPCLPointCloud2(pcl_pc2, *point_cloud);
+    pcl::fromROSMsg(*point_cloud_msg, *point_cloud);
 
     // Check if the point cloud empty
     if (point_cloud->empty()) {
@@ -375,41 +388,120 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         return closest_points;
     }
 
-    // Pre-process the point cloud
-    std::vector<int> indices;
-    pcl::removeNaNFromPointCloud(*point_cloud, *point_cloud, indices);
-
-    // Filter points based on distance
-    pcl::PointCloud<pcl::PointXYZ>::Ptr point_cloud_filtered(
-        new pcl::PointCloud<pcl::PointXYZ>
-    );
-    for (const auto& point : point_cloud->points) {
-        double distance = std::sqrt(point.x * point.x + point.y * point.y);
-
-        if (distance >= params_.min_len && distance <= params_.max_len)
-            point_cloud_filtered->push_back(point);
-    }
+    // Filtering
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud = distance_filter(point_cloud);
+    // filtered_point_cloud = ground_removal_filter(filtered_point_cloud);
 
     // Check if the filtered point cloud empty
-    if (point_cloud_filtered->empty()) {
+    if (filtered_point_cloud->empty()) {
         RCLCPP_ERROR(this->get_logger(), "lidar_camera_fusion: Filtered point cloud is empty!");
         // Return empty vector
         return closest_points;
     }
 
 
+    pcl::RangeImageSpherical::Ptr range_img(new pcl::RangeImageSpherical);
+    // Range image will be represented in the lidar coordinate system.
+    pcl::RangeImage::CoordinateFrame coordinate_frame = 
+        pcl::RangeImage::LASER_FRAME;
+
+    Eigen::Affine3f sensor_pose = 
+        (Eigen::Affine3f)Eigen::Translation3f(0.0f, 0.0f, 0.0f);
+    range_img->pcl::RangeImage::createFromPointCloud(
+        *filtered_point_cloud,
+        pcl::deg2rad(params_.ang_res_x),
+        pcl::deg2rad(params_.ang_res_y),
+        pcl::deg2rad(params_.max_ang_w),
+        pcl::deg2rad(params_.max_ang_h),
+        sensor_pose,
+        coordinate_frame,
+        0.0f,
+        0.0f,
+        0
+    );
+
+
+    // Interpolation
+    arma::mat range_matrix_interp, height_matrix_interp;
+    interp_range_img(range_img, range_matrix_interp, height_matrix_interp);
+
+    // Filtering
+    arma::mat range_matrix_out = variance_filter(range_matrix_interp);
+
+
+    // Point cloud reconstruction from range image
+    pcl::PointCloud<pcl::PointXYZ>::Ptr interp_point_cloud(
+        new pcl::PointCloud<pcl::PointXYZ>
+    );
+    interp_point_cloud->width = range_matrix_interp.n_cols;
+    interp_point_cloud->height = range_matrix_interp.n_rows;
+    interp_point_cloud->is_dense = false;
+    interp_point_cloud->points.resize(
+        interp_point_cloud->width * interp_point_cloud->height
+    );
+    // Range image to point cloud
+    int num_pc = 0;
+
+    for(int i = 0; i < range_matrix_interp.n_rows - params_.interp_value; ++i) {
+        for(int j = 0; j < (int)range_matrix_interp.n_cols; ++j) {
+            float ang = params_.min_fov + 
+                ((params_.max_fov - params_.min_fov) * j) / (range_matrix_interp.n_cols);
+
+            if(!(range_matrix_out(i, j) == 0)) {
+                float pc_modulo = range_matrix_out(i, j);
+
+                if (pow(pc_modulo, 2) < pow(height_matrix_interp(i, j), 2)) 
+                    continue;
+                
+                float sqrt_component = sqrt(pow(pc_modulo, 2) - pow(height_matrix_interp(i, j), 2));
+                float pc_x = sqrt_component * sin(ang);
+                float pc_y = sqrt_component * cos(ang);
+
+                float ang_x_lidar = 0.6 * M_PI / 180.0;
+                //matrix  transformation between lidar and range image. It rotates the angles that it has of error with respect to the ground
+                Eigen::MatrixXf Lidar_matrix(3,3);
+                Eigen::MatrixXf result(3,1);
+                Lidar_matrix << cos(ang_x_lidar), 0, sin(ang_x_lidar),
+                                0               , 1, 0,
+                               -sin(ang_x_lidar), 0, cos(ang_x_lidar);
+
+                result <<   pc_x,
+                            pc_y,
+                            height_matrix_interp(i, j);
+
+                // range image to point cloud X-axis rotation for correction
+                result = Lidar_matrix * result;
+
+                interp_point_cloud->points[num_pc].x = result(0);
+                interp_point_cloud->points[num_pc].y = result(1);
+                interp_point_cloud->points[num_pc].z = result(2);
+
+                num_pc++;
+            }
+        }
+    }
+
+    /** @todo temp */
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_no_ground(new pcl::PointCloud<pcl::PointXYZ>);
+    cloud_no_ground = ground_removal_filter(interp_point_cloud);
+
+    // cloud_no_ground = sor_filter(cloud_no_ground);
+
+
     Eigen::MatrixXf lidar_camera(3, 1);
     Eigen::MatrixXf point_cloud_matrix(4, 1);
     uint px_data, py_data;
 
-    //auto start = std::chrono::high_resolution_clock::now();
+    // auto start = std::chrono::high_resolution_clock::now();
 
     // Store closest point and min distance for each cone
-    std::vector<std::pair<pcl::PointXYZ, double>> cone_closest_points(detected_cones.size(),
-        {pcl::PointXYZ(), std::numeric_limits<double>::max()});
+    std::vector<std::pair<pcl::PointXYZ, double>> cone_closest_points(
+        detected_cones.size(),
+        { pcl::PointXYZ(), std::numeric_limits<double>::max() }
+    );
 
-    // Loop over all the points in the filtered point cloud
-    for (const auto& point : point_cloud_filtered->points) {
+    // Loop over all the points in the interpolated point cloud
+    for (const auto& point : cloud_no_ground->points) {
         // Transform point from LiDAR to Camera
         point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
         lidar_camera = camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
@@ -421,43 +513,335 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         // Skip points outside of image bounds
         if (px_data >= image_msg->width || py_data >= image_msg->height)
             continue;
+        
+#ifndef NDEBUG
+        int x_color = (int)(255 * ((point.x) / params_.max_len));
+        int z_color = (int)(255 * ((point.x) / 10.0));
+
+        if(z_color > 255) {
+            z_color = 255;
+        }
+
+        cv::circle(
+            cv_image_ptr->image,
+            cv::Point(px_data, py_data),
+            1,
+            CV_RGB(255 - x_color, (int)(z_color), x_color),
+            cv::FILLED
+        );
+#endif
     
-        // Iterate over each detected cone and find the closest point
-        for (size_t idx = 0; idx < detected_cones.size(); ++idx) {
-            const auto& pair = detected_cones[idx];
-            // Get the center of each cone box (cv::Rect)
-            int center_x = pair.second.x + pair.second.width / 2;
-            int center_y = pair.second.y + pair.second.height / 2;
+        for (auto& cone : cone_infos) {
+            cv::Rect search_area = cone.bbox;
+            search_area.x -= search_area.width / 2;
+            search_area.y -= search_area.height / 2;
+            search_area.width *= 2;
+            search_area.height *= 2;
 
-            // Calculate the distance to the center of the cone
-            double distance_to_center = std::sqrt(
-                std::pow(px_data - center_x, 2) + std::pow(py_data - center_y, 2)
-            );
-
-            // Find the closest point
-            if (distance_to_center < cone_closest_points[idx].second) {
-                cone_closest_points[idx] = {point, distance_to_center};
+            if (search_area.contains(cv::Point(px_data, py_data))) {
+                cone.associated_points.push_back(point);
             }
         }
     }
 
-    // Write closest points for return
-    for (size_t i = 0; i < cone_closest_points.size(); ++i) {
-        const auto& closest_point = cone_closest_points[i].first;
-        double distance = std::sqrt(closest_point.x * closest_point.x + closest_point.y * closest_point.y);
+    // for (auto& cone : cone_infos) {
+    //     if (cone.associated_points.empty()) continue;
 
-        if (distance < (params_.max_len - 4.0)) {
-            std::string cone_id = detected_cones[i].first;
-            closest_points.push_back(std::make_pair(cone_id, closest_point));
+    //     pcl::PointXYZ sum(0, 0, 0);
+    //     for (const auto& p : cone.associated_points) {
+    //         sum.x += p.x;
+    //         sum.y += p.y;
+    //         sum.z += p.z;
+    //     }
+    //     cone.average_point.x = sum.x / cone.associated_points.size();
+    //     cone.average_point.y = sum.y / cone.associated_points.size();
+    //     cone.average_point.z = sum.z / cone.associated_points.size();
+    //     cone.confidence = std::min(1.0, cone.associated_points.size() / 100.0);
+
+    //     if (cone.confidence > 0.5) {
+    //         closest_points.push_back(std::make_pair(cone.id, cone.average_point));
+    //     }
+    // }
+
+    for (auto& cone : cone_infos) {
+        if (cone.associated_points.empty()) continue;
+
+        pcl::PointXYZ sum(0, 0, 0);
+        double min_distance = std::numeric_limits<double>::max();
+        pcl::PointXYZ closest_point;
+
+        for (const auto& p : cone.associated_points) {
+            sum.x += p.x;
+            sum.y += p.y;
+            sum.z += p.z;
+
+            double distance = std::sqrt(
+                std::pow(p.x - cone.average_point.x, 2) +
+                std::pow(p.y - cone.average_point.y, 2) +
+                std::pow(p.z - cone.average_point.z, 2)
+            );
+
+            if (distance < min_distance) {
+                min_distance = distance;
+                closest_point = p;
+            }
+        }
+
+        cone.average_point.x = sum.x / cone.associated_points.size();
+        cone.average_point.y = sum.y / cone.associated_points.size();
+        cone.average_point.z = sum.z / cone.associated_points.size();
+
+        closest_points.push_back(std::make_pair(cone.id, closest_point));
+    }
+
+    for (size_t i = 0; i < closest_points.size(); ++i) {
+        for (size_t j = i + 1; j < closest_points.size(); ++j) {
+            double distance = std::sqrt(
+                std::pow(closest_points[i].second.x - closest_points[j].second.x, 2) +
+                std::pow(closest_points[i].second.y - closest_points[j].second.y, 2) +
+                std::pow(closest_points[i].second.z - closest_points[j].second.z, 2)
+            );
+
+            if (distance < 2.0) {
+                closest_points.erase(closest_points.begin() + j);
+                --i;
+                break;
+            }
         }
     }
 
 
-    //auto end = std::chrono::high_resolution_clock::now();
-    //auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    //std::cout << "Execution time: " << duration.count() << " microseconds  size: " << closest_points.size() << std::endl;
+    // auto end = std::chrono::high_resolution_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    // std::cout << "Execution time: " << duration.count() << " microseconds  size: " << closest_points.size() << std::endl;
+
+#ifndef NDEBUG
+    sensor_msgs::msg::PointCloud2 temp_cloud;
+
+    pcl::toROSMsg(*filtered_point_cloud, temp_cloud);
+    temp_cloud.header = point_cloud_msg->header;
+    filtered_point_cloud_publisher_->publish(temp_cloud);
+
+    temp_cloud.data.clear();
+    pcl::toROSMsg(*cloud_no_ground, temp_cloud);
+    temp_cloud.header = point_cloud_msg->header;
+    interp_point_cloud_publisher_->publish(temp_cloud);
+
+    // cv::Mat range_img_cv(range_img->height, range_img->width, CV_8UC1);
+    // for(int i = 0; i < range_img->height; ++i) {
+    //     for (int j = 0; j < range_img->width; ++j) {
+    //         float range = range_img->getPoint(i, j).range;
+    //         range_img_cv.at<float>(i, j) = range;
+    //         // if(std::isfinite(range)) {
+    //         //     range_img_cv.at<float>(y, x) = range;
+    //         // } else {
+    //         //     range_img_cv.at<float>(y, x) = 0.0f;
+    //         // }
+    //     }
+    // }
+    // cv::normalize(range_img_cv, range_img_cv, 0, 255, cv::NORM_MINMAX);
+    // range_img_cv.convertTo(range_img_cv, CV_8UC1);
+    // sensor_msgs::msg::Image::SharedPtr range_img_msg = 
+    //     cv_bridge::CvImage(image_msg->header, "mono8", range_img_cv).toImageMsg();
+    // range_img_publisher_->publish(*range_img_msg);
+
+    temp_cloud.data.clear();
+    // range_img_cloud_publisher_->publish(temp_cloud);
+
+    point_cloud_on_img_publisher_->publish(*cv_image_ptr->toImageMsg());
+#endif
 
     return closest_points;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::distance_filter(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud
+) {
+    // Create a new cloud to store the filtered points
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+
+    // Remove NaN points from the input point cloud
+    std::vector<int> indices;
+    pcl::removeNaNFromPointCloud(*point_cloud, *filtered_point_cloud, indices);
+
+    // Filter points based on distance (keeping points within a specified range)
+    pcl::PointCloud<pcl::PointXYZ>::Ptr distance_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+    for (const auto& point : filtered_point_cloud->points) {
+        // Calculate the distance from the origin (x, y plane)
+        double distance = std::sqrt(point.x * point.x + point.y * point.y);
+        // Keep points that are within the specified distance range
+        if (distance >= params_.min_len && distance <= params_.max_len) {
+            distance_filtered->push_back(point);
+        }
+    }
+
+    return distance_filtered;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::ground_removal_filter(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud
+) {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_no_ground(new pcl::PointCloud<pcl::PointXYZ>);
+
+    // Create the SAC segmentation object for ground plane extraction
+    pcl::SACSegmentation<pcl::PointXYZ> seg;
+    seg.setOptimizeCoefficients(true);
+    seg.setModelType(pcl::SACMODEL_PLANE);
+    seg.setMethodType(pcl::SAC_RANSAC);
+    // Max distance from the plane for a point to be considered part of it
+    seg.setDistanceThreshold(0.05);
+
+    pcl::PointIndices::Ptr inlier_indices(new pcl::PointIndices);
+    // Coefficients of the plane model
+    pcl::ModelCoefficients::Ptr model_coefficients(new pcl::ModelCoefficients);
+
+    seg.setInputCloud(point_cloud);
+    // Apply segmentation to obtain the indices of the ground points (inliers)
+    seg.segment(*inlier_indices, *model_coefficients);
+
+    if (inlier_indices->indices.size() == 0) {
+        PCL_ERROR("Ground plane not found.\n");
+        return point_cloud;
+    }
+
+    // Extract the points that are not part of the ground (remove inliers)
+    pcl::ExtractIndices<pcl::PointXYZ> extract;
+    extract.setInputCloud(point_cloud);
+    extract.setIndices(inlier_indices);
+    // True to remove the ground points
+    extract.setNegative(true);
+    extract.filter(*cloud_no_ground);
+    
+    return cloud_no_ground;
+}
+
+void ConeDetection::interp_range_img(
+    const pcl::RangeImageSpherical::Ptr &range_img,
+    arma::mat &range_matrix_interp,
+    arma::mat &height_matrix_interp
+) {
+    // Get the dimensions of the image
+    int img_cols = range_img->width;
+    int img_rows = range_img->height;
+
+    // Range image (height values mapped onto the range image)
+    arma::mat range_matrix, height_matrix;
+    range_matrix.zeros(img_rows, img_cols);
+    height_matrix.zeros(img_rows, img_cols);
+
+    for (int i = 0; i < img_cols; ++i) {
+        for (int j = 0; j < img_rows; ++j) {
+            float range = range_img->getPoint(i, j).range;
+            float height = range_img->getPoint(i, j).z;
+
+            if (
+                std::isinf(range) ||
+                range < params_.min_len ||
+                range > params_.max_len ||
+                std::isnan(height)
+            ) {
+                continue;
+            }
+
+            range_matrix.at(j, i) = range;   
+            height_matrix.at(j, i) = height;
+        }
+    }
+
+    // Horizontal spacing of the range image (i.e., the column indices)
+    arma::vec x_spacing = arma::regspace(1, range_matrix.n_cols);
+    // Vertical spacing of the range image (i.e., the row indices)
+    arma::vec y_spacing = arma::regspace(1, range_matrix.n_rows);
+
+    // Magnify by approximately 2
+    arma::vec x_spacing_scaled = 
+        arma::regspace(x_spacing.min(), 1.0, x_spacing.max());
+    //
+    arma::vec y_spacing_scaled = arma::regspace(
+        y_spacing.min(), 1.0 / params_.interp_value, y_spacing.max()
+    );
+
+    arma::interp2(
+        x_spacing, y_spacing,
+        range_matrix,
+        x_spacing_scaled, y_spacing_scaled,
+        range_matrix_interp, "lineal"
+    );
+    arma::interp2(
+        x_spacing, y_spacing,
+        height_matrix,
+        x_spacing_scaled, y_spacing_scaled,
+        height_matrix_interp, "lineal"
+    );
+}
+
+arma::mat ConeDetection::variance_filter(
+    const arma::mat &range_matrix_interp
+) {
+    arma::mat range_matrix_out = range_matrix_interp;
+
+    // Filtering of elements interpolated with the background
+    for(int i = 0; i < (int)range_matrix_interp.n_rows; ++i) {
+        for(int j = 0; j < (int)range_matrix_interp.n_cols ; ++j) {
+            if(range_matrix_interp(i, j) == 0) {
+                if(i + params_.interp_value < range_matrix_interp.n_rows) {
+                    for(int k = 1; k <= params_.interp_value; ++k) {
+                        range_matrix_out(i + k, j) = 0;
+                    }
+                }
+                if(i > params_.interp_value) {
+                    for (int k = 1; k <= params_.interp_value; ++k) {
+                        range_matrix_out(i - k, j) = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    // Variance filtering
+    for(int i = 0; i < ((range_matrix_interp.n_rows - 1) / params_.interp_value); ++i) {
+        for(int j = 0; j < (int)range_matrix_interp.n_cols; ++j) {
+            double avg = 0;
+            double variance = 0;
+
+            for(int k = 0; k < params_.interp_value ; ++k) {
+                avg = avg + range_matrix_interp((i * params_.interp_value) + k, j);
+            }
+            
+            avg = avg / params_.interp_value;
+
+            for(int k = 0; k < params_.interp_value; ++k) {
+                variance = variance + pow(
+                    range_matrix_interp((i * params_.interp_value) + k, j) - avg,
+                    2.0
+                );
+            }
+
+            if(variance > params_.max_var) {
+                for(int k = 0; k < params_.interp_value; ++k) {
+                    range_matrix_out((i * params_.interp_value) + k, j) = 0;
+                }
+            }
+        }
+    }
+
+    return range_matrix_out;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::sor_filter(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud
+) {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_no_outliers(new pcl::PointCloud<pcl::PointXYZ>);
+    
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+    // Number of neighboring points for outlier detection, neighborhood size for each point
+    sor.setMeanK(32);
+    // Standard deviation threshold, points farther away from the value will be removed
+    sor.setStddevMulThresh(1.0);
+    sor.setInputCloud(point_cloud);
+    sor.filter(*cloud_no_outliers);
+
+    return cloud_no_outliers;
 }
 
 #include "rclcpp_components/register_node_macro.hpp"

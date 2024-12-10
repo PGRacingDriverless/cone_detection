@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.8)
 project(cone_detection)
 
 if(NOT CMAKE_CXX_STANDARD)
@@ -11,7 +11,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# CUDA
 option(USE_CUDA "Enable CUDA support" ON)
 
 if(USE_CUDA)
@@ -22,7 +21,31 @@ else()
     set(USE_CUDA OFF)
 endif()
 
-# ONNX Runtime
+find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_auto REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
+# find_package(pcl_ros REQUIRED)
+# find_package(pcl_conversions REQUIRED)
+find_package(message_filters REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+
+find_package(common_msgs REQUIRED)
+
+find_package(PCL REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(OpenCV 4.5 REQUIRED)
+find_package(Armadillo 10.8 REQUIRED)
+
+if(BUILD_TESTING)
+    find_package(ament_lint_auto REQUIRED)
+    ament_lint_auto_find_test_dependencies()
+endif()
+
 set(ONNXRUNTIME_VERSION 1.18.1)
 
 if(USE_CUDA)
@@ -31,27 +54,16 @@ else()
     set(ONNXRUNTIME_ROOT "/usr/local/onnxruntime-libs/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}")
 endif()
 
-include_directories(${ONNXRUNTIME_ROOT}/include)
-
 set(ONNXRUNTIME_LIB ${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so)
 
-# OpenCV
-find_package(OpenCV 4.5 REQUIRED)
-include_directories(${OpenCV_INCLUDE_DIRS})
-# PCL
-find_package(PCL REQUIRED)
-include_directories(include ${PCL_INCLUDE_DIRS})
-find_package(pcl_ros REQUIRED)
-#
-find_package(rclcpp REQUIRED)
-find_package(Eigen3 REQUIRED)
-find_package(message_filters REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(visualization_msgs REQUIRED)
+include_directories(include
+    ${ARMADILLO_INCLUDE_DIRS}
+    ${EIGEN3_INCLUDE_DIR}
+    ${ONNXRUNTIME_ROOT}/include
+    ${OpenCV_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+)
 
-#
-find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
 ament_auto_add_library(${PROJECT_NAME} SHARED
@@ -65,17 +77,13 @@ rclcpp_components_register_node(
     EXECUTABLE ${PROJECT_NAME}_node
 )
 
-target_link_libraries(
-    ${PROJECT_NAME}
+target_link_libraries(${PROJECT_NAME}
+    ${ARMADILLO_LIBRARIES}
+    Eigen3::Eigen
     ${ONNXRUNTIME_LIB}
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
 )
-
-if(BUILD_TESTING)
-    find_package(ament_lint_auto REQUIRED)
-    ament_lint_auto_find_test_dependencies()
-endif()
 
 ament_auto_package(
     INSTALL_TO_SHARE
