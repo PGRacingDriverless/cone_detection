@@ -47,6 +47,10 @@ jobs:
                 path: ws/src/
             - name: Check if the module is buildable
               run: |
+                pwd
                 source /opt/ros/humble/setup.bash
-                cd ws/src/
+                cd ws/
+                pwd
+                ls -la ./src
                 colcon build --symlink-install --packages-select cone_detection common_msgs --cmake-args -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
+                pwd
