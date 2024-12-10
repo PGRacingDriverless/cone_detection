@@ -34,7 +34,7 @@ find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 
-find_package(pathplanner_msgs REQUIRED)
+find_package(common_msgs REQUIRED)
 
 find_package(PCL REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -79,10 +79,10 @@ rclcpp_components_register_node(
 
 target_link_libraries(${PROJECT_NAME}
     ${ARMADILLO_LIBRARIES}
+    Eigen3::Eigen
     ${ONNXRUNTIME_LIB}
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
-    Eigen3::Eigen
 )
 
 ament_auto_package(

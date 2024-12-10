@@ -32,8 +32,8 @@
 // Messages
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
-#include "pathplanner_msgs/msg/cone_array.hpp"
-#include "pathplanner_msgs/msg/cone.hpp"
+#include "common_msgs/msg/cone_array.hpp"
+#include "common_msgs/msg/cone.hpp"
 // Image detection using a model
 #include "model.hpp"
 // Standard
@@ -118,7 +118,7 @@ private:
     std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>> lidar_camera_synchronizer_;
 
     /** Publisher for detected cones. */
-    rclcpp::Publisher<pathplanner_msgs::msg::ConeArray>::SharedPtr detected_cones_publisher_;
+    rclcpp::Publisher<common_msgs::msg::ConeArray>::SharedPtr detected_cones_publisher_;
 // CMake macro for debug build
 #ifndef NDEBUG
     /** Publishes image with labeled and boxed detected cones. */

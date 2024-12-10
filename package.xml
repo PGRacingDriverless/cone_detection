@@ -21,7 +21,7 @@
     <depend>std_msgs</depend>
     <depend>visualization_msgs</depend>
     <depend>cv_bridge</depend>
-    <depend>pathplanner_msgs</depend>
+    <depend>common_msgs</depend>
 
     <exec_depend>ament_index_python</exec_depend>
     <exec_depend>launch</exec_depend>

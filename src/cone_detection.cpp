@@ -136,7 +136,7 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
 
     // Create publisher for detected cones with queue size of 5
     detected_cones_publisher_ = 
-        this->create_publisher<pathplanner_msgs::msg::ConeArray>("cone_array", 5);
+        this->create_publisher<common_msgs::msg::ConeArray>("cone_array", 5);
 
 #ifndef NDEBUG
     // Create publishers for debug
@@ -187,13 +187,13 @@ void ConeDetection::cone_detection_callback(
     visualization_msgs::msg::MarkerArray cone_markers_array_msg;
 #endif
     // Creating message with detected cones for path planner
-    pathplanner_msgs::msg::ConeArray cone_array_msg;
+    common_msgs::msg::ConeArray cone_array_msg;
 
     for (const auto& pair : cone_positions) {
         pcl::PointXYZ cone_closest_point = pair.second;
 
         // Creating cone msg
-        pathplanner_msgs::msg::Cone cone_msg;
+        common_msgs::msg::Cone cone_msg;
         cone_msg.x = cone_closest_point.x;
         cone_msg.y = cone_closest_point.y;
 
