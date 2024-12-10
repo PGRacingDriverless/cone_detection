@@ -1,0 +1,52 @@
+name: cone_detection build test
+run-name: Commit by @${{ github.actor }}
+
+on:
+    push:
+        branches: ["main"]
+    pull_request:
+        branches: ["main"]
+
+jobs:
+    test:
+        runs-on: ubuntu-22.04
+        steps:
+            - name: Install ROS2 Humble
+              run: |
+                sudo apt-get update
+                sudo apt-get install curl gnupg2 software-properties-common
+                sudo add-apt-repository universe
+                curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+                sudo apt-get update
+                sudo apt-get install ros-humble-ros-base ros-dev-tools ros-humble-ament-*
+            - name: Install dependencies
+              run: |
+                sudo apt-get update
+                sudo apt-get install cmake libarmadillo-dev libopencv-dev ros-humble-cv-bridge ros-humble-pcl-ros
+            - name: Install ONNX Runtime
+              run: |
+                sudo apt-get update
+                sudo apt-get install tar wget
+                wget https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
+                tar -xvzf onnxruntime-linux-x64-1.18.1.tgz
+                sudo mkdir -p /usr/local/onnxruntime-libs
+                sudo mv onnxruntime-linux-x64-1.18.1 /usr/local/onnxruntime-libs/
+                rm onnxruntime-linux-x64-1.18.1.tgz
+            - name: Create workspace folder
+              run: |
+                mkdir -p ws/src/
+            - name: Clone cone_detection repo
+              uses: actions/checkout@v3
+              with:
+                path: ws/src/
+            - name: Clone common repo for common_msgs
+              uses: actions/checkout@v3
+              with:
+                repository: PGRacingDriverless/common
+                path: ws/src/
+            - name: Check if the module is buildable
+              run: |
+                source /opt/ros/humble/setup.bash
+                cd ws/src/
+                colcon build --symlink-install --packages-select cone_detection common_msgs --cmake-args -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
