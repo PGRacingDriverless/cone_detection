@@ -27,7 +27,7 @@
         # Lidar-Camera fusion params
         # | Ouster OS1-64: 131072 point/rotate,
         # | ang_res_x: 0.17578125 (for 90 deg), ang_res_y: 0.3516
-        max_len: 30.0
+        max_len: 22.0
         min_len: 0.01
         max_fov: 2.3554
         min_fov: 0.7854
