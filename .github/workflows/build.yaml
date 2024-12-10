@@ -35,22 +35,18 @@ jobs:
                 rm onnxruntime-linux-x64-1.18.1.tgz
             - name: Create workspace folder
               run: |
-                mkdir -p ws/src/
+                mkdir -p ws/src/cone_detection ws/src/common
             - name: Clone cone_detection repo
               uses: actions/checkout@v3
               with:
-                path: ws/src/
+                path: ws/src/cone_detection/
             - name: Clone common repo for common_msgs
               uses: actions/checkout@v3
               with:
                 repository: PGRacingDriverless/common
-                path: ws/src/
+                path: ws/src/common
             - name: Check if the module is buildable
               run: |
-                pwd
                 source /opt/ros/humble/setup.bash
                 cd ws/
-                pwd
-                ls -la ./src
                 colcon build --symlink-install --packages-select cone_detection common_msgs --cmake-args -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
-                pwd
