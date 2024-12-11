@@ -202,9 +202,9 @@ void ConeDetection::cone_detection_callback(
          * always inner. Look at the Skid Pad.
          */
         if (pair.first == "blue_cone") {
-            cone_msg.side = 0;
-        } else if(pair.first == "yellow_cone") {
             cone_msg.side = 1;
+        } else if(pair.first == "yellow_cone") {
+            cone_msg.side = 0;
         } else {
             continue;
         }
@@ -240,11 +240,11 @@ void ConeDetection::cone_detection_callback(
         cone_marker_msg.action = visualization_msgs::msg::Marker::ADD;
         cone_marker_msg.pose = pose;
         cone_marker_msg.scale = vector3;
-        if (cone_msg.side == 0) {
+        if (cone_msg.side == 1) {
             cone_marker_msg.color.r = 0.0;
             cone_marker_msg.color.g = 0.0;
             cone_marker_msg.color.b = 1.0;
-        } else if (cone_msg.side == 1) {
+        } else if (cone_msg.side == 0) {
             cone_marker_msg.color.r = 0.96;
             cone_marker_msg.color.g = 0.94;
             cone_marker_msg.color.b = 0.06;
