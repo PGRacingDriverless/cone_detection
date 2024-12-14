@@ -18,7 +18,7 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     lidar_camera_qos.history = RMW_QOS_POLICY_HISTORY_KEEP_LAST;
     // Maximum number of messages to store
     lidar_camera_qos.depth = 2;
-    // Best effort reliability (i.e. no guarantees to deliver samples)
+    // Most reliabile frame (i.e. guarantees to deliver samples)
     lidar_camera_qos.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
     // Messages are lost if the node crashes
     lidar_camera_qos.durability = RMW_QOS_POLICY_DURABILITY_VOLATILE;
