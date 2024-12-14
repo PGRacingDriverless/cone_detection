@@ -17,9 +17,9 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     // Only keep the last message in history
     lidar_camera_qos.history = RMW_QOS_POLICY_HISTORY_KEEP_LAST;
     // Maximum number of messages to store
-    lidar_camera_qos.depth = 10;
+    lidar_camera_qos.depth = 2;
     // Best effort reliability (i.e. no guarantees to deliver samples)
-    lidar_camera_qos.reliability = RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT;
+    lidar_camera_qos.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
     // Messages are lost if the node crashes
     lidar_camera_qos.durability = RMW_QOS_POLICY_DURABILITY_VOLATILE;
 
@@ -44,7 +44,7 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     // Create a synchronizer to handle messages from both subscribers with
     // the specified queue size
     lidar_camera_synchronizer_ = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>>(
-        message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>(30),
+        message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>(3),
         *lidar_points_subscriber_,
         *camera_image_subscriber_
     );
