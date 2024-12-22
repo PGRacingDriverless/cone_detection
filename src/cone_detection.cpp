@@ -3,7 +3,10 @@
 ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options) 
     : Node("cone_detection", node_options)
 {
-    // Read and set topic names from the .yaml config file
+    // Read and set mission, topic names from the .yaml config file
+    mission_ = 
+        this->declare_parameter<std::string>("mission", "trackdrive");
+    RCLCPP_INFO(this->get_logger(), "=== Started in mission mode: \033[1;32m%s\033[0m 🏁 ===", mission_.c_str());
     lidar_points_topic_ = 
         this->declare_parameter<std::string>("lidar_points_topic");
     camera_image_topic_ = 

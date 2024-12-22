@@ -165,6 +165,9 @@ private:
     /** Height threshold in pixels for distance filtering. */
     int height_in_pixels;
 
+    /** The current dynamic event (mission). Check launch file for additional information */
+    std::string mission_;
+
     /**
      * Filter cones by `cv::Rect` box height in pixels.
      * @param detected_cones vector of pairs of cone class name and cone

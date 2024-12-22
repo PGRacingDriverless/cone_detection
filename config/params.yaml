@@ -1,5 +1,13 @@
 /cone_detection_node:
     ros__parameters:
+        # The current event (mission) 
+        # Possible values (lowercase):
+        # - "acceleration" : acceleration test
+        # - "skidpad"      : figure-eight handling test
+        # - "autocross"    : obstacle avoidance (slalom)
+        # - "trackdrive"   : multiple laps on a track
+        # - "endurance"    : long-distance reliability and efficiency test
+        mission: "trackdrive"
         # Topic names
         lidar_points_topic: "/lidar/Lidar1"
         camera_image_topic: "/fsds/cam1/image_color"
