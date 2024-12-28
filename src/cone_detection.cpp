@@ -103,22 +103,19 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     // Read and set matrices for lidar-camera fusion
     std::vector<double> temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("camera_matrix");
-    camera_matrix_.resize(3,4);
-    camera_matrix_ << (double)temp_matrix_vec[0], (double)temp_matrix_vec[1], (double)temp_matrix_vec[2], (double)temp_matrix_vec[3],
-                      (double)temp_matrix_vec[4], (double)temp_matrix_vec[5], (double)temp_matrix_vec[6], (double)temp_matrix_vec[7],
-                      (double)temp_matrix_vec[8], (double)temp_matrix_vec[9], (double)temp_matrix_vec[10], (double)temp_matrix_vec[11];
+    Eigen::Map<Eigen::Matrix<double, 3, 4, Eigen::RowMajor>> 
+        double_camera(temp_matrix_vec.data());
+    camera_matrix_ = double_camera.cast<float>();
     temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("rotation_matrix");
-    rotation_matrix_.resize(3,3);
-    rotation_matrix_ << (double)temp_matrix_vec[0], (double)temp_matrix_vec[1], (double)temp_matrix_vec[2],
-                        (double)temp_matrix_vec[3], (double)temp_matrix_vec[4], (double)temp_matrix_vec[5],
-                        (double)temp_matrix_vec[6], (double)temp_matrix_vec[7], (double)temp_matrix_vec[8];
+    Eigen::Map<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>
+        double_rotation(temp_matrix_vec.data());
+    rotation_matrix_ = double_rotation.cast<float>();
     temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("translation_matrix");
-    translation_matrix_.resize(3,1);
-    translation_matrix_ << (double)temp_matrix_vec[0],
-                           (double)temp_matrix_vec[1],
-                           (double)temp_matrix_vec[2];
+    Eigen::Map<Eigen::Matrix<double, 3, 1>> 
+        double_translation(temp_matrix_vec.data());
+    translation_matrix_ = double_translation.cast<float>();
     
     // Create transformation matrix
     transformation_matrix_.resize(4,4);
