@@ -43,7 +43,7 @@
         ang_res_y: 0.3516
         max_ang_w: 90.0
         max_ang_h: 35.0
-        interp_value: 15.0
+        interp_value: 5.0
         max_var: 20.0
         # Lidar-Camera fusion matrices
         camera_matrix: [

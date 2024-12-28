@@ -179,7 +179,7 @@ void ConeDetection::cone_detection_callback(
     // Filter detected cones
     filter_by_px_height(detected_cones);
     // Merge camera and lidar data and return closest points for each cone
-    std::vector<std::pair<std::string, pcl::PointXYZ>> cone_positions = 
+        std::vector<std::pair<std::string, pcl::PointXYZ>> cone_positions = 
         lidar_camera_fusion(point_cloud_msg, image_msg, detected_cones);
 
 #ifndef NDEBUG
@@ -780,46 +780,46 @@ arma::mat ConeDetection::variance_filter(
 ) {
     arma::mat range_matrix_out = range_matrix_interp;
 
-    // Filtering of elements interpolated with the background
+    // Combined Filtering of elements interpolated with background and variance filtering
     for(int i = 0; i < (int)range_matrix_interp.n_rows; ++i) {
-        for(int j = 0; j < (int)range_matrix_interp.n_cols ; ++j) {
+        for(int j = 0; j < (int)range_matrix_interp.n_cols; ++j) {
+            // Background interpolation filtering
             if(range_matrix_interp(i, j) == 0) {
                 if(i + params_.interp_value < range_matrix_interp.n_rows) {
                     for(int k = 1; k <= params_.interp_value; ++k) {
                         range_matrix_out(i + k, j) = 0;
                     }
                 }
-                if(i > params_.interp_value) {
+                if(i - params_.interp_value >= 0) {
                     for (int k = 1; k <= params_.interp_value; ++k) {
                         range_matrix_out(i - k, j) = 0;
                     }
                 }
             }
-        }
-    }
 
-    // Variance filtering
-    for(int i = 0; i < ((range_matrix_interp.n_rows - 1) / params_.interp_value); ++i) {
-        for(int j = 0; j < (int)range_matrix_interp.n_cols; ++j) {
-            double avg = 0;
-            double variance = 0;
+            // Variance filtering (for every block of params_.interp_value rows)
+            if(i < (int)range_matrix_interp.n_rows - 1) {
+                if (i % (int)params_.interp_value == 0) {
+                    double avg = 0;
+                    double variance = 0;
 
-            for(int k = 0; k < params_.interp_value ; ++k) {
-                avg = avg + range_matrix_interp((i * params_.interp_value) + k, j);
-            }
-            
-            avg = avg / params_.interp_value;
+                    // Calculate the average for the current block
+                    for(int k = 0; k < params_.interp_value; ++k) {
+                        avg += range_matrix_interp(i + k, j);
+                    }
+                    avg /= params_.interp_value;
 
-            for(int k = 0; k < params_.interp_value; ++k) {
-                variance = variance + pow(
-                    range_matrix_interp((i * params_.interp_value) + k, j) - avg,
-                    2.0
-                );
-            }
+                    // Calculate the variance for the current block
+                    for(int k = 0; k < params_.interp_value; ++k) {
+                        variance += pow(range_matrix_interp(i + k, j) - avg, 2.0);
+                    }
 
-            if(variance > params_.max_var) {
-                for(int k = 0; k < params_.interp_value; ++k) {
-                    range_matrix_out((i * params_.interp_value) + k, j) = 0;
+                    // Apply variance filtering if needed
+                    if(variance > params_.max_var) {
+                        for(int k = 0; k < params_.interp_value; ++k) {
+                            range_matrix_out(i + k, j) = 0;
+                        }
+                    }
                 }
             }
         }
