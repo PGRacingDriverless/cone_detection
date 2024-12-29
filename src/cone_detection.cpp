@@ -3,40 +3,35 @@
 ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options) 
     : Node("cone_detection", node_options)
 {
-    // Read and set mission, topic names from the .yaml config file
-    mission_ = 
-        this->declare_parameter<std::string>("mission", "trackdrive");
-    RCLCPP_INFO(this->get_logger(), "=== Started in mission mode: \033[1;32m%s\033[0m 🏁 ===", mission_.c_str());
+    mission_ = this->declare_parameter<std::string>("mission", "trackdrive");
+    RCLCPP_INFO(
+        this->get_logger(),
+        "=== Started in mission mode: \033[1;32m%s\033[0m 🏁 ===",
+        mission_.c_str()
+    );
+    
+
     lidar_points_topic_ = 
         this->declare_parameter<std::string>("lidar_points_topic");
     camera_image_topic_ = 
         this->declare_parameter<std::string>("camera_image_topic");
     
-    // Synchronization of messages from lidar_points_topic_ and
-    // camera_image_topic_
+    // Synchronization of msgs from lidar_points_topic_ and camera_image_topic_
     
     // Define custom QoS profile for subscribers
     rmw_qos_profile_t lidar_camera_qos = rmw_qos_profile_default;
-    // Only keep the last message in history
     lidar_camera_qos.history = RMW_QOS_POLICY_HISTORY_KEEP_LAST;
-    // Maximum number of messages to store
     lidar_camera_qos.depth = 2;
-    // Most reliabile frame (i.e. guarantees to deliver samples)
     lidar_camera_qos.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
-    // Messages are lost if the node crashes
     lidar_camera_qos.durability = RMW_QOS_POLICY_DURABILITY_VOLATILE;
 
     // Define subscription options for subscribers
     rclcpp::SubscriptionOptions lidar_camera_options;
-    // No specific callback group
     lidar_camera_options.callback_group = nullptr;
-    // Use custom callbacks instead of default ones
     lidar_camera_options.use_default_callbacks = false;
-    // Don't ignore local publications (i.e. messages published by this node)
     lidar_camera_options.ignore_local_publications = false;
 
-    // Create subscribers for lidar_points_topic_ and camera_image_topic_
-    // with our custom profile and custom options
+    // Create subscribers with our custom profile and custom options
     lidar_points_subscriber_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(
         this, lidar_points_topic_, lidar_camera_qos, lidar_camera_options
     );
@@ -44,20 +39,23 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
         this, camera_image_topic_, lidar_camera_qos, lidar_camera_options
     );
 
-    // Create a synchronizer to handle messages from both subscribers with
-    // the specified queue size
+    // Create a synchronizer to handle messages from both subscribers
     lidar_camera_synchronizer_ = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>>(
         message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>(3),
         *lidar_points_subscriber_,
         *camera_image_subscriber_
     );
 
-    // Register a callback with the synchronizer to process synchronized messages
-    lidar_camera_synchronizer_->registerCallback(std::bind(&ConeDetection::cone_detection_callback, this, std::placeholders::_1, std::placeholders::_2));
+    // Register callback with the synchronizer
+    lidar_camera_synchronizer_->registerCallback(std::bind(
+        &ConeDetection::cone_detection_callback,
+        this,
+        std::placeholders::_1,
+        std::placeholders::_2
+    ));
 
 
     ModelParams params;
-    // Read and set params for the model from the .yaml config file
     params.model_path = this->declare_parameter<std::string>("model_path");
     params.classes = 
         this->declare_parameter<std::vector<std::string>>("classes");
@@ -70,8 +68,6 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
         this->declare_parameter<float>("rect_confidence_threshold");
 
     SessionOptions options;
-    // Read and set options for the session from the .yaml config file
-// For the case: "cudaEnable: true" in the config, but CUDA is not used.
 #ifdef USE_CUDA
     options.cuda_enable = this->declare_parameter<bool>("cuda_enable");
 #else
@@ -82,40 +78,35 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     options.log_severity_level = 
         this->declare_parameter<int>("log_severity_level");
 
-    // Create model instance and pointer to it
     model_ = std::make_shared<Model>();
-    // Create a session with specified options
     model_->init(options, params);
 
     
-    // Read and set params for the lidar-camera fusion from the .yaml config
     params_.max_len = this->declare_parameter<float>("max_len");
     params_.min_len = this->declare_parameter<float>("min_len");
-    params_.max_fov = this->declare_parameter<float>("max_fov");
-    params_.min_fov = this->declare_parameter<float>("min_fov");
-    params_.ang_res_x = this->declare_parameter<float>("ang_res_x");
-    params_.ang_res_y = this->declare_parameter<float>("ang_res_y");
-    params_.max_ang_w = this->declare_parameter<float>("max_ang_w");
-    params_.max_ang_h = this->declare_parameter<float>("max_ang_h");
-    params_.interp_value = this->declare_parameter<float>("interp_value");
-    params_.max_var = this->declare_parameter<float>("max_var");
+    params_.interp_factor = this->declare_parameter<float>("interp_factor");
 
     // Read and set matrices for lidar-camera fusion
     std::vector<double> temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("camera_matrix");
-    Eigen::Map<Eigen::Matrix<double, 3, 4, Eigen::RowMajor>> 
-        double_camera(temp_matrix_vec.data());
-    camera_matrix_ = double_camera.cast<float>();
+    Eigen::Map<Eigen::Matrix<double, 3, 4, Eigen::RowMajor>> camera_matrix_d(
+        temp_matrix_vec.data()
+    );
+    camera_matrix_ = camera_matrix_d.cast<float>();
+
     temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("rotation_matrix");
-    Eigen::Map<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>
-        double_rotation(temp_matrix_vec.data());
-    rotation_matrix_ = double_rotation.cast<float>();
+    Eigen::Map<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>> rotation_matrix_d(
+        temp_matrix_vec.data()
+    );
+    rotation_matrix_ = rotation_matrix_d.cast<float>();
+
     temp_matrix_vec = 
         this->declare_parameter<std::vector<double>>("translation_matrix");
-    Eigen::Map<Eigen::Matrix<double, 3, 1>> 
-        double_translation(temp_matrix_vec.data());
-    translation_matrix_ = double_translation.cast<float>();
+    Eigen::Map<Eigen::Matrix<double, 3, 1>> translation_matrix_d(
+        temp_matrix_vec.data()
+    );
+    translation_matrix_ = translation_matrix_d.cast<float>();
     
     // Create transformation matrix
     transformation_matrix_.resize(4,4);
@@ -134,12 +125,11 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     ));
 
 
-    // Create publisher for detected cones with queue size of 5
     detected_cones_publisher_ = 
         this->create_publisher<common_msgs::msg::ConeArray>("cone_array", 5);
 
+    // Debug publishers
 #ifndef NDEBUG
-    // Create publishers for debug
     detection_frames_publisher_ = 
         this->create_publisher<sensor_msgs::msg::Image>("cone_detection/image_detected", 5);
     cone_markers_publisher_ = 
@@ -148,10 +138,6 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
         this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/filtered_point_cloud", 5);
     interp_point_cloud_publisher_ = 
         this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/interp_point_cloud", 5);
-    range_img_publisher_ = 
-        this->create_publisher<sensor_msgs::msg::Image>("cone_detection/range_image", 5);
-    range_img_cloud_publisher_ = 
-        this->create_publisher<sensor_msgs::msg::PointCloud2>("cone_detection/range_image_cloud", 5);
     point_cloud_on_img_publisher_ = 
         this->create_publisher<sensor_msgs::msg::Image>("cone_detection/point_cloud_on_img", 5);
 #endif
@@ -164,9 +150,8 @@ void ConeDetection::cone_detection_callback(
     // Convert ROS image_msg to CV image
     cv_bridge::CvImagePtr cv_image_ptr;
     try {
-        // toCvCopy and toCvShare difference, encodings, etc.:
-        // https://wiki.ros.org/cv_bridge/Tutorials/UsingCvBridgeToConvertBetweenROSImagesAndOpenCVImages
-        cv_image_ptr = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
+        cv_image_ptr =
+            cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
     }
     catch (cv_bridge::Exception& e) {
         RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
@@ -175,17 +160,20 @@ void ConeDetection::cone_detection_callback(
 
     // Detect cones
     std::vector<std::pair<std::string, cv::Rect>> detected_cones = 
-        camera_cones_detect(cv_image_ptr);
+        detect_cones_on_img(cv_image_ptr);
     // Filter detected cones
     filter_by_px_height(detected_cones);
-    // Merge camera and lidar data and return closest points for each cone
-     auto start = std::chrono::high_resolution_clock::now();
 
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    // Merge camera and lidar data and return closest points for each cone
     std::vector<std::pair<std::string, pcl::PointXYZ>> cone_positions = 
         lidar_camera_fusion(point_cloud_msg, image_msg, detected_cones);
-     auto end = std::chrono::high_resolution_clock::now();
-     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-     std::cout << "Execution time: " << duration.count() << std::endl;
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = 
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "Execution time: " << duration.count() << std::endl;
 
 #ifndef NDEBUG
     int cone_marker_id_ = 0;
@@ -202,10 +190,6 @@ void ConeDetection::cone_detection_callback(
         cone_msg.x = cone_closest_point.x;
         cone_msg.y = cone_closest_point.y;
 
-        /**
-         * @todo Change the logic for detecting color. Yellow is not
-         * always inner. Look at the Skid Pad.
-         */
         if (pair.first == "blue_cone") {
             cone_msg.side = 1;
         } else if(pair.first == "yellow_cone") {
@@ -263,44 +247,37 @@ void ConeDetection::cone_detection_callback(
 #endif
     }
 
+    detected_cones_publisher_->publish(cone_array_msg);
+
 #ifndef NDEBUG
     // Convert CV image to ROS msg and publish image message with
     // detected cones (labels and boxes)
     detection_frames_publisher_->publish(*cv_image_ptr->toImageMsg());
-    // Publish cone markers for visualization
+    
     cone_markers_publisher_->publish(cone_markers_array_msg);
 #endif
-    // Publish message with detected cones (positions and sides)
-    detected_cones_publisher_->publish(cone_array_msg);
 }
 
-std::vector<std::pair<std::string, cv::Rect>> ConeDetection::camera_cones_detect(
+std::vector<std::pair<std::string, cv::Rect>> ConeDetection::detect_cones_on_img(
     cv_bridge::CvImagePtr cv_image_ptr
 ) {
     std::vector<std::pair<std::string, cv::Rect>> detected_cones;
-    // Detecting cones with model
+    
     std::vector<ModelResult> results = model_->detect(cv_image_ptr->image);
 
-    // Creating pairs with cone class name and cone box in the image
     for (const auto& result : results) {
         detected_cones.push_back(std::make_pair(
             std::string(model_->get_class_by_id(result.class_id)),
             result.box
         ));
 #ifndef NDEBUG
-        // Choose the color
         cv::Scalar color(0, 256, 0);
-
-        // Highlight the box with the color
         cv::rectangle(cv_image_ptr->image, result.box, color, 3);
-
-        // Calculating probability from confidence
+        
         float confidence = floor(100 * result.confidence) / 100;
-        // Creating label with class name and probability
         std::string label = model_->get_class_by_id(result.class_id) + " " +
             std::to_string(confidence).substr(0, std::to_string(confidence).size() - 4);
 
-        // Creating field for the label on the image
         cv::rectangle(
             cv_image_ptr->image,
             cv::Point(result.box.x, result.box.y - 25),
@@ -309,7 +286,6 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::camera_cones_detect
             cv::FILLED
         );
 
-        // Adding label to the image
         cv::putText(
             cv_image_ptr->image,
             label,
@@ -320,7 +296,6 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::camera_cones_detect
             2
         );
 
-        // Mark the "center" of each cone on the CV image
         int center_x = result.box.x + result.box.width / 2;
         int center_y = result.box.y + result.box.height / 2;
         cv::circle(
@@ -350,54 +325,6 @@ void ConeDetection::filter_by_px_height(
     detected_cones = filtered_cones;
 }
 
-#include <pcl/io/pcd_io.h>
-#include <pcl/point_types.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/search/kdtree.h>
-#include <pcl/point_cloud.h>
-#include <pcl/filters/passthrough.h>
-
- pcl::PointCloud<pcl::PointXYZ>::Ptr interpolatePointCloud(
-        const pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud, float interpolation_factor)
-    {
-        pcl::search::KdTree<pcl::PointXYZ> kdtree;
-        kdtree.setInputCloud(input_cloud);
-
-        pcl::PointCloud<pcl::PointXYZ>::Ptr interpolated_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-
-        for (size_t i = 0; i < input_cloud->points.size(); ++i) {
-            pcl::PointXYZ point = input_cloud->points[i];
-
-            std::vector<int> point_indices;
-            std::vector<float> point_distances;
-
-            kdtree.nearestKSearch(point, 2, point_indices, point_distances);
-
-            for (size_t j = 0; j < point_indices.size(); ++j) {
-                const pcl::PointXYZ& neighbor = input_cloud->points[point_indices[j]];
-
-                if (point_distances[j] < 0.1) {
-                    pcl::PointXYZ new_point;
-                    new_point.x = (point.x + neighbor.x) / 2.0f; 
-                    new_point.y = (point.y + neighbor.y) / 2.0f;
-                    new_point.z = (point.z + neighbor.z) / 2.0f;
-
-                    for (int k = 1; k < interpolation_factor; ++k) {
-                        pcl::PointXYZ interpolated_point;
-                        interpolated_point.x = point.x + k * (new_point.x - point.x) / interpolation_factor;
-                        interpolated_point.y = point.y + k * (new_point.y - point.y) / interpolation_factor;
-                        interpolated_point.z = point.z + k * (new_point.z - point.z) / interpolation_factor;
-                        interpolated_cloud->points.push_back(interpolated_point);
-                    }
-                    interpolated_cloud->points.push_back(new_point);
-                }
-            }
-        }
-
-        return interpolated_cloud;
-    }
-
-
 std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_fusion(        
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
@@ -414,19 +341,17 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         cone_infos.push_back(info);
     }
 
+
     // Convert ROS image_msg to CV image
     cv_bridge::CvImagePtr cv_image_ptr;
     try {
-        // toCvCopy and toCvShare difference, encodings, etc.:
-        // https://wiki.ros.org/cv_bridge/Tutorials/UsingCvBridgeToConvertBetweenROSImagesAndOpenCVImages
-        cv_image_ptr = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
+        cv_image_ptr = 
+            cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
     }
     catch (cv_bridge::Exception& e) {
         RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
-        // Return empty vector
         return closest_points;
     }
-
 
     // Convert ROS point_cloud_msg to PCL-compatible format
     pcl::PointCloud<pcl::PointXYZ>::Ptr point_cloud(
@@ -434,46 +359,43 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     );
     pcl::fromROSMsg(*point_cloud_msg, *point_cloud);
 
-    // Check if the point cloud empty
     if (point_cloud->empty()) {
-        RCLCPP_ERROR(this->get_logger(), "lidar_camera_fusion: Input point cloud is empty!");
-        // Return empty vector
+        RCLCPP_ERROR(
+            this->get_logger(),
+            "lidar_camera_fusion: Input point cloud is empty!"
+        );
         return closest_points;
     }
+
 
     // Filtering
-    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud = distance_filter(point_cloud);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud = 
+        distance_filter(point_cloud);
     filtered_point_cloud = ground_removal_filter(filtered_point_cloud);
 
-    // Check if the filtered point cloud empty
     if (filtered_point_cloud->empty()) {
-        RCLCPP_ERROR(this->get_logger(), "lidar_camera_fusion: Filtered point cloud is empty!");
-        // Return empty vector
+        RCLCPP_ERROR(
+            this->get_logger(),
+            "lidar_camera_fusion: Filtered point cloud is empty!"
+        );
         return closest_points;
     }
 
-    // Интерполируем облако точек
-    float interpolation_factor = 3.0f; // Вы можете настроить этот фактор для изменения плотности
-    pcl::PointCloud<pcl::PointXYZ>::Ptr interpolated_cloud = interpolatePointCloud(filtered_point_cloud, interpolation_factor);
+    // Interpolation
+    pcl::PointCloud<pcl::PointXYZ>::Ptr interpolated_point_cloud =
+        interp_point_cloud(filtered_point_cloud);
 
 
     Eigen::MatrixXf lidar_camera(3, 1);
     Eigen::MatrixXf point_cloud_matrix(4, 1);
     uint px_data, py_data;
 
-    // auto start = std::chrono::high_resolution_clock::now();
-
-    // Store closest point and min distance for each cone
-    std::vector<std::pair<pcl::PointXYZ, double>> cone_closest_points(
-        detected_cones.size(),
-        { pcl::PointXYZ(), std::numeric_limits<double>::max() }
-    );
-
     // Loop over all the points in the interpolated point cloud
-    for (const auto& point : interpolated_cloud->points) {
+    for (const auto& point : interpolated_point_cloud->points) {
         // Transform point from LiDAR to Camera
         point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
-        lidar_camera = camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
+        lidar_camera = 
+            camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
 
         // Project 3D point to image plane
         px_data = static_cast<int>(lidar_camera(0, 0) / lidar_camera(2, 0));
@@ -482,6 +404,19 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         // Skip points outside of image bounds
         if (px_data >= image_msg->width || py_data >= image_msg->height)
             continue;
+
+        //
+        for (auto& cone : cone_infos) {
+            cv::Rect search_area = cone.bbox;
+            search_area.x -= search_area.width / 2;
+            search_area.y -= search_area.height / 2;
+            search_area.width *= 2;
+            search_area.height *= 2;
+
+            if (search_area.contains(cv::Point(px_data, py_data))) {
+                cone.associated_points.push_back(point);
+            }
+        }
         
 #ifndef NDEBUG
         int x_color = (int)(255 * ((point.x) / params_.max_len));
@@ -499,18 +434,6 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
             cv::FILLED
         );
 #endif
-    
-        for (auto& cone : cone_infos) {
-            cv::Rect search_area = cone.bbox;
-            search_area.x -= search_area.width / 2;
-            search_area.y -= search_area.height / 2;
-            search_area.width *= 2;
-            search_area.height *= 2;
-
-            if (search_area.contains(cv::Point(px_data, py_data))) {
-                cone.associated_points.push_back(point);
-            }
-        }
     }
 
     for (auto& cone : cone_infos) {
@@ -560,11 +483,6 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         }
     }
 
-
-    // auto end = std::chrono::high_resolution_clock::now();
-    // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    // std::cout << "Execution time: " << duration.count() << " microseconds  size: " << closest_points.size() << std::endl;
-
 #ifndef NDEBUG
     sensor_msgs::msg::PointCloud2 temp_cloud;
 
@@ -573,30 +491,9 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     filtered_point_cloud_publisher_->publish(temp_cloud);
 
     temp_cloud.data.clear();
-    pcl::toROSMsg(*interpolated_cloud, temp_cloud);
+    pcl::toROSMsg(*interpolated_point_cloud, temp_cloud);
     temp_cloud.header = point_cloud_msg->header;
     interp_point_cloud_publisher_->publish(temp_cloud);
-
-    // cv::Mat range_img_cv(range_img->height, range_img->width, CV_8UC1);
-    // for(int i = 0; i < range_img->height; ++i) {
-    //     for (int j = 0; j < range_img->width; ++j) {
-    //         float range = range_img->getPoint(i, j).range;
-    //         range_img_cv.at<float>(i, j) = range;
-    //         // if(std::isfinite(range)) {
-    //         //     range_img_cv.at<float>(y, x) = range;
-    //         // } else {
-    //         //     range_img_cv.at<float>(y, x) = 0.0f;
-    //         // }
-    //     }
-    // }
-    // cv::normalize(range_img_cv, range_img_cv, 0, 255, cv::NORM_MINMAX);
-    // range_img_cv.convertTo(range_img_cv, CV_8UC1);
-    // sensor_msgs::msg::Image::SharedPtr range_img_msg = 
-    //     cv_bridge::CvImage(image_msg->header, "mono8", range_img_cv).toImageMsg();
-    // range_img_publisher_->publish(*range_img_msg);
-
-    temp_cloud.data.clear();
-    // range_img_cloud_publisher_->publish(temp_cloud);
 
     point_cloud_on_img_publisher_->publish(*cv_image_ptr->toImageMsg());
 #endif
@@ -608,17 +505,23 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::distance_filter(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud
 ) {
     // Create a new cloud to store the filtered points
-    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud(
+        new pcl::PointCloud<pcl::PointXYZ>
+    );
 
     // Remove NaN points from the input point cloud
     std::vector<int> indices;
     pcl::removeNaNFromPointCloud(*point_cloud, *filtered_point_cloud, indices);
 
     // Filter points based on distance (keeping points within a specified range)
-    pcl::PointCloud<pcl::PointXYZ>::Ptr distance_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr distance_filtered(
+        new pcl::PointCloud<pcl::PointXYZ>
+    );
+    
     for (const auto& point : filtered_point_cloud->points) {
         // Calculate the distance from the origin (x, y plane)
         double distance = std::sqrt(point.x * point.x + point.y * point.y);
+        
         // Keep points that are within the specified distance range
         if (distance >= params_.min_len && distance <= params_.max_len) {
             distance_filtered->push_back(point);
@@ -631,7 +534,9 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::distance_filter(
 pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::ground_removal_filter(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud
 ) {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_no_ground(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_no_ground(
+        new pcl::PointCloud<pcl::PointXYZ>
+    );
 
     // Create the SAC segmentation object for ground plane extraction
     pcl::SACSegmentation<pcl::PointXYZ> seg;
@@ -663,6 +568,54 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::ground_removal_filter(
     extract.filter(*cloud_no_ground);
     
     return cloud_no_ground;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::interp_point_cloud(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr& point_cloud
+) {
+    pcl::search::KdTree<pcl::PointXYZ> kdtree;
+    kdtree.setInputCloud(point_cloud);
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr interpolated_cloud(
+        new pcl::PointCloud<pcl::PointXYZ>
+    );
+
+    for (size_t i = 0; i < point_cloud->points.size(); ++i) {
+        pcl::PointXYZ point = point_cloud->points[i];
+
+        std::vector<int> point_indices;
+        std::vector<float> point_distances;
+
+        kdtree.nearestKSearch(point, 2, point_indices, point_distances);
+
+        for (size_t j = 0; j < point_indices.size(); ++j) {
+            const pcl::PointXYZ& neighbor =
+                point_cloud->points[point_indices[j]];
+
+            if (point_distances[j] < 0.1) {
+                pcl::PointXYZ new_point;
+                new_point.x = (point.x + neighbor.x) / 2.0f; 
+                new_point.y = (point.y + neighbor.y) / 2.0f;
+                new_point.z = (point.z + neighbor.z) / 2.0f;
+
+                for (int k = 1; k < params_.interp_factor; ++k) {
+                    pcl::PointXYZ interp_point;
+                    interp_point.x = 
+                        point.x + k * (new_point.x - point.x) / params_.interp_factor;
+                    interp_point.y = 
+                        point.y + k * (new_point.y - point.y) / params_.interp_factor;
+                    interp_point.z = 
+                        point.z + k * (new_point.z - point.z) / params_.interp_factor;
+                    
+                    interpolated_cloud->points.push_back(interp_point);
+                }
+
+                interpolated_cloud->points.push_back(new_point);
+            }
+        }
+    }
+
+    return interpolated_cloud;
 }
 
 #include "rclcpp_components/register_node_macro.hpp"
