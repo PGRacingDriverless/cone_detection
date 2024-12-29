@@ -2,7 +2,7 @@
 #define CONE_DETECTION_HPP
 
 // Show debug data in release and debug modes
-//#undef NDEBUG
+#undef NDEBUG
 
 #include <rclcpp/rclcpp.hpp>
 // Matrix manipulations
