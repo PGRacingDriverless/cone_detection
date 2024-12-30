@@ -159,21 +159,28 @@ void ConeDetection::cone_detection_callback(
     }
 
     // Detect cones
+    auto start = std::chrono::high_resolution_clock::now();
     std::vector<std::pair<std::string, cv::Rect>> detected_cones = 
         detect_cones_on_img(cv_image_ptr);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = 
+    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "Detection time: " << duration.count() << std::endl;
+
     // Filter detected cones
     filter_by_px_height(detected_cones);
 
-    auto start = std::chrono::high_resolution_clock::now();
+    start = std::chrono::high_resolution_clock::now();
     
     // Merge camera and lidar data and return closest points for each cone
     std::vector<std::pair<std::string, pcl::PointXYZ>> cone_positions = 
         lidar_camera_fusion(point_cloud_msg, image_msg, detected_cones);
     
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = 
+    end = std::chrono::high_resolution_clock::now();
+    duration = 
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "Execution time: " << duration.count() << std::endl;
+    std::cout << "Fusion time: " << duration.count() << std::endl;
 
 #ifndef NDEBUG
     int cone_marker_id_ = 0;
@@ -330,6 +337,8 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
     const std::vector<std::pair<std::string, cv::Rect>> &detected_cones
 ) {
+    int img_width = static_cast<int>(image_msg->width);
+    int int_height = static_cast<int>(image_msg->height);
     // The closest point to each cone
     std::vector<std::pair<std::string, pcl::PointXYZ>> closest_points;
 
@@ -340,7 +349,6 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         info.bbox = cone.second;
         cone_infos.push_back(info);
     }
-
 
     // Convert ROS image_msg to CV image
     cv_bridge::CvImagePtr cv_image_ptr;
@@ -367,7 +375,6 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         return closest_points;
     }
 
-
     // Filtering
     pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud = 
         distance_filter(point_cloud);
@@ -385,55 +392,66 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     pcl::PointCloud<pcl::PointXYZ>::Ptr interpolated_point_cloud =
         interp_point_cloud(filtered_point_cloud);
 
+    Eigen::MatrixXf combined_matrix = camera_matrix_ * transformation_matrix_;
 
-    Eigen::MatrixXf lidar_camera(3, 1);
+    std::unordered_map<int, std::vector<pcl::PointXYZ>> projection_map;
     Eigen::MatrixXf point_cloud_matrix(4, 1);
-    uint px_data, py_data;
-
-    // Loop over all the points in the interpolated point cloud
+    Eigen::MatrixXf lidar_camera;
+    int px, py;
     for (const auto& point : interpolated_point_cloud->points) {
-        // Transform point from LiDAR to Camera
+        
         point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
-        lidar_camera = 
-            camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
 
-        // Project 3D point to image plane
-        px_data = static_cast<int>(lidar_camera(0, 0) / lidar_camera(2, 0));
-        py_data = static_cast<int>(lidar_camera(1, 0) / lidar_camera(2, 0));
+        lidar_camera = camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
 
-        // Skip points outside of image bounds
-        if (px_data >= image_msg->width || py_data >= image_msg->height)
-            continue;
+        px = static_cast<int>(lidar_camera(0, 0) / lidar_camera(2, 0));
+        py = static_cast<int>(lidar_camera(1, 0) / lidar_camera(2, 0));
 
-        //
-        for (auto& cone : cone_infos) {
-            cv::Rect search_area = cone.bbox;
-            search_area.x -= search_area.width / 2;
-            search_area.y -= search_area.height / 2;
-            search_area.width *= 2;
-            search_area.height *= 2;
+        if (px >= 0 && px < img_width && py >= 0 && py < int_height) {
+            int idx = py * img_width + px; 
+            projection_map[idx].push_back(point);
+        }
+    }
+    
+    for (auto& cone : cone_infos) {
+        cv::Rect search_area = cone.bbox;
 
-            if (search_area.contains(cv::Point(px_data, py_data))) {
-                cone.associated_points.push_back(point);
+        for (int y = search_area.y; y < search_area.y + search_area.height; ++y) {
+            for (int x = search_area.x; x < search_area.x + search_area.width; ++x) {
+                int idx = y * img_width + x;
+                if (projection_map.count(idx)) {
+                    cone.associated_points.insert(
+                        cone.associated_points.end(),
+                        projection_map[idx].begin(),
+                        projection_map[idx].end()
+                    );
+                }
             }
         }
-        
-#ifndef NDEBUG
-        int x_color = (int)(255 * ((point.x) / params_.max_len));
-        int z_color = (int)(255 * ((point.x) / 10.0));
+    }
 
-        if(z_color > 255) {
-            z_color = 255;
+    for (size_t i = 0; i < cone_infos.size(); ++i) {
+        for (size_t j = i + 1; j < cone_infos.size(); ++j) {
+            cv::Rect intersection = cone_infos[i].bbox & cone_infos[j].bbox;
+            if (intersection.area() > 0) {
+                auto& points_i = cone_infos[i].associated_points;
+                auto& points_j = cone_infos[j].associated_points;
+
+                points_i.erase(
+                    std::remove_if(points_i.begin(), points_i.end(), [&cone_infos, j](const pcl::PointXYZ& p) {
+                        return cone_infos[j].bbox.contains(cv::Point(p.x, p.y));
+                    }),
+                    points_i.end()
+                );
+
+                points_j.erase(
+                    std::remove_if(points_j.begin(), points_j.end(), [&cone_infos, i](const pcl::PointXYZ& p) {
+                        return cone_infos[i].bbox.contains(cv::Point(p.x, p.y));
+                    }),
+                    points_j.end()
+                );
+            }
         }
-
-        cv::circle(
-            cv_image_ptr->image,
-            cv::Point(px_data, py_data),
-            1,
-            CV_RGB(255 - x_color, (int)(z_color), x_color),
-            cv::FILLED
-        );
-#endif
     }
 
     for (auto& cone : cone_infos) {
