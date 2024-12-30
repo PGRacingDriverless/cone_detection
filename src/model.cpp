@@ -1,14 +1,6 @@
 #include "cone_detection/model.hpp"
 
-// Just the constructor.
-Model::Model() {}
-
-// Clear the memory allocated for the session.
-Model::~Model() {
-    delete session_;
-}
-
-bool Model::init(const SessionOptions& options, const ModelParams& params) {
+Model::Model(const SessionOptions& options, const ModelParams& params) {
     try {
         // Set options used to construct session
         Ort::SessionOptions session_options;
@@ -29,18 +21,22 @@ bool Model::init(const SessionOptions& options, const ModelParams& params) {
         // Create OrtEnv object with setted logging level
         env_ = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "Model");
         // Create session from a model file with options
-        session_ = new Ort::Session(env_, params_.model_path.c_str(), session_options);
+        session_ = std::make_unique<Ort::Session>(
+            env_,
+            params_.model_path.c_str(),
+            session_options
+        );
         // Create RunOptions object
         options_ = Ort::RunOptions{ nullptr };
 
+        // Allocate memory for blob
+        blob = std::make_unique<float[]>(params_.img_size.at(0) * params_.img_size.at(1) * 3);
+
         get_node_names();
         warm_up();
-
-        return true;
     }
     catch (const std::exception& e) {
         RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Model: %s", e.what());
-        return false;
     }
 }
 
@@ -51,13 +47,9 @@ std::vector<ModelResult> Model::detect(const cv::Mat& img) {
         // Preprocess image
         cv::Mat processed_img = letterboxing(img);
         
-        float* blob = new float[processed_img.total() * 3];
-        blob_from_image(processed_img, blob);
+        blob_from_image(processed_img);
         
-        auto output_tensors = create_tensor_and_run(blob);
-
-        // Freeing the allocated memory
-        delete[] blob;
+        auto output_tensors = create_tensor_and_run();
 
         res = process_output_tensors(output_tensors);
     }
@@ -68,7 +60,7 @@ std::vector<ModelResult> Model::detect(const cv::Mat& img) {
     return res;
 }
 
-void Model::blob_from_image(const cv::Mat& img, float*& blob) {
+void Model::blob_from_image(const cv::Mat& img) {
     int channels = img.channels();
     int height = img.rows;
     int width = img.cols;
@@ -83,7 +75,7 @@ void Model::blob_from_image(const cv::Mat& img, float*& blob) {
     }
 }
 
-std::vector<Ort::Value> Model::create_tensor_and_run(float*& blob) {
+std::vector<Ort::Value> Model::create_tensor_and_run() {
     // Create a vector of tensor dimensions of the input node
     std::vector<int64_t> input_node_dims =
         { 1, 3, params_.img_size.at(0), params_.img_size.at(1) };
@@ -91,7 +83,7 @@ std::vector<Ort::Value> Model::create_tensor_and_run(float*& blob) {
     // Create a tensor
     Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
             Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU),
-            blob,
+            blob.get(),
             3 * params_.img_size.at(0) * params_.img_size.at(1),
             input_node_dims.data(),
             input_node_dims.size()
@@ -122,8 +114,25 @@ void Model::get_node_names() {
     for (size_t node_num = 0; node_num < input_nodes_num; node_num++) {
         Ort::AllocatedStringPtr input_node_name =
             session_->GetInputNameAllocated(node_num, allocator);
-        // input_node_names_.push_back(input_node_name.get());
-        /** @todo Idk why it works in such way. */
+        /**
+         * @todo We need "Array of null terminated UTF8 encoded
+         * strings of the output names" for ONNX Runtime
+         * 
+         * case 1:
+         * input_node_names_.push_back(input_node_name.get());
+         * The memory is cleared after leaving input_node_name
+         * go out of scope.
+         * 
+         * case 2:
+         * std::string temp_str(input_node_name.get());
+         * input_node_names_.push_back(temp_str.c_str());
+         * c_str() return pointer on string buffer.
+         * No string = no memory.
+         * 
+         * case 3:
+         * char* temp_buf = new char[50]; <- we set buffer size here!!!
+         * This memory never cleared, so it works.
+         */
         char* temp_buf = new char[50];
         strcpy(temp_buf, input_node_name.get());
         input_node_names_.push_back(temp_buf);
@@ -133,7 +142,6 @@ void Model::get_node_names() {
     for (size_t node_num = 0; node_num < output_nodes_num; node_num++) {
         Ort::AllocatedStringPtr output_node_name =
             session_->GetOutputNameAllocated(node_num, allocator);
-        // output_node_names_.push_back(output_node_name.get());
         char* temp_buf = new char[50];
         strcpy(temp_buf, output_node_name.get());
         output_node_names_.push_back(temp_buf);
@@ -266,15 +274,15 @@ void Model::warm_up() {
     // Preprocess "image"
     cv::Mat processed_img = letterboxing(img);
 
-    float* blob = new float[img.total() * 3];
-    blob_from_image(processed_img, blob);
+    blob_from_image(processed_img);
 
-    create_tensor_and_run(blob);
-
-    // Freeing the allocated memory
-    delete[] blob;
+    create_tensor_and_run();
 }
 
 std::string Model::get_class_by_id(int class_id) {
+    if (class_id < 0 || static_cast<size_t>(class_id) >= params_.classes.size()) {
+        throw std::out_of_range("Invalid class_id");
+    }
+
     return params_.classes[class_id];
 }

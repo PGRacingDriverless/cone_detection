@@ -78,8 +78,7 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     options.log_severity_level = 
         this->declare_parameter<int>("log_severity_level");
 
-    model_ = std::make_shared<Model>();
-    model_->init(options, params);
+    model_ = std::make_shared<Model>(options, params);
 
     
     params_.max_len = this->declare_parameter<float>("max_len");
@@ -396,7 +395,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     Eigen::MatrixXf point_cloud_matrix(4, 1);
     Eigen::MatrixXf lidar_camera;
     int px, py;
-    
+
     for (const auto& point : interpolated_point_cloud->points) {
         
         point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
