@@ -143,12 +143,13 @@ private:
     int height_in_pixels;
 
     /**
-     * Filter cones by `cv::Rect` box height in pixels.
+     * Filters cones by `cv::Rect` box height in pixels.
      * @param detected_cones vector of pairs of cone class name and cone
      * box (`cv::Rect`) for filtering.
+     * @return filtered vector of pairs.
      */
-    void filter_by_px_height(
-        std::vector<std::pair<std::string, cv::Rect>> &detected_cones
+    std::vector<std::pair<std::string, cv::Rect>> filter_by_px_height(
+        const std::vector<std::pair<std::string, cv::Rect>> &detected_cones
     );
 
     /** Lidar-camera fusion parameters. */
@@ -184,7 +185,7 @@ private:
     );
 
     /**
-     * Point cloud distance-based filtering. 
+     * Filters point cloud based on min and max distances from config. 
      * @param point_cloud point cloud for filtering.
      * @return filtered point cloud.
      */
@@ -193,9 +194,9 @@ private:
     );
 
     /**
-     * Point cloud ground removal filtering.
-     * @param point_cloud point cloud for filtering.
-     * @return filtered point cloud.
+     * Removes ground from point cloud using SAC segmentation.
+     * @param point_cloud point cloud for ground removing.
+     * @return point cloud without ground.
      * @todo move distance threshold to config.
      */
     pcl::PointCloud<pcl::PointXYZ>::Ptr ground_removal_filter(
@@ -203,9 +204,11 @@ private:
     );
 
     /**
-     * Interpolates point cloud using KdTree.
-     * @param point_cloud point cloud for filtering.
+     * Interpolates point cloud. Uses KdTree to perform nearest-neighbor
+     * searches for interpolation between points in point cloud.
+     * @param point_cloud point cloud for interpolation.
      * @return interpolated point cloud.
+     * @todo move neighbors number to config.
      */
     pcl::PointCloud<pcl::PointXYZ>::Ptr interp_point_cloud(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud

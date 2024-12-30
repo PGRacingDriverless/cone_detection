@@ -168,7 +168,7 @@ void ConeDetection::cone_detection_callback(
     std::cout << "Detection time: " << duration.count() << std::endl;
 
     // Filter detected cones
-    filter_by_px_height(detected_cones);
+    detected_cones = filter_by_px_height(detected_cones);
 
     start = std::chrono::high_resolution_clock::now();
     
@@ -317,18 +317,19 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::detect_cones_on_img
     return detected_cones;
 }
 
-void ConeDetection::filter_by_px_height(
-    std::vector<std::pair<std::string, cv::Rect>> &detected_cones
+std::vector<std::pair<std::string, cv::Rect>> ConeDetection::filter_by_px_height(
+    const std::vector<std::pair<std::string, cv::Rect>> &detected_cones
 ) {
     std::vector<std::pair<std::string, cv::Rect>> filtered_cones;
-    
+    filtered_cones.reserve(detected_cones.size());
+
     for(const auto& cone : detected_cones) {
         if(cone.second.height >= height_in_pixels) {
             filtered_cones.push_back(cone);
         }
     }
 
-    detected_cones = filtered_cones;
+    return filtered_cones;
 }
 
 std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_fusion(        
@@ -375,8 +376,13 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     }
 
     // Filtering
-    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud = 
-        distance_filter(point_cloud);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud(
+        new pcl::PointCloud<pcl::PointXYZ>
+    );
+    
+    std::vector<int> indices;
+    pcl::removeNaNFromPointCloud(*point_cloud, *filtered_point_cloud, indices);
+    filtered_point_cloud = distance_filter(filtered_point_cloud);
     filtered_point_cloud = ground_removal_filter(filtered_point_cloud);
 
     if (filtered_point_cloud->empty()) {
@@ -520,51 +526,47 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
 pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::distance_filter(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud
 ) {
-    // Create a new cloud to store the filtered points
     pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud(
         new pcl::PointCloud<pcl::PointXYZ>
     );
+    // Reserve space
+    filtered_point_cloud->points.reserve(point_cloud->points.size());
 
-    // Remove NaN points from the input point cloud
-    std::vector<int> indices;
-    pcl::removeNaNFromPointCloud(*point_cloud, *filtered_point_cloud, indices);
-
-    // Filter points based on distance (keeping points within a specified range)
-    pcl::PointCloud<pcl::PointXYZ>::Ptr distance_filtered(
-        new pcl::PointCloud<pcl::PointXYZ>
-    );
+    // Calculate squared min and max lengths
+    float min_len_squared = params_.min_len * params_.min_len;
+    float max_len_squared = params_.max_len * params_.max_len;
     
-    for (const auto& point : filtered_point_cloud->points) {
-        // Calculate the distance from the origin (x, y plane)
-        double distance = std::sqrt(point.x * point.x + point.y * point.y);
+    for (const auto& point : point_cloud->points) {
+        // Calculate squared distance from origin
+        float dist_squared = point.x * point.x + point.y * point.y;
         
-        // Keep points that are within the specified distance range
-        if (distance >= params_.min_len && distance <= params_.max_len) {
-            distance_filtered->push_back(point);
-        }
+        if (dist_squared < min_len_squared || dist_squared > max_len_squared)
+            continue;
+        
+        filtered_point_cloud->points.push_back(point);
     }
 
-    return distance_filtered;
+    return filtered_point_cloud;
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::ground_removal_filter(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud
 ) {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_no_ground(
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_point_cloud(
         new pcl::PointCloud<pcl::PointXYZ>
     );
-
-    // Create the SAC segmentation object for ground plane extraction
-    pcl::SACSegmentation<pcl::PointXYZ> seg;
-    seg.setOptimizeCoefficients(true);
-    seg.setModelType(pcl::SACMODEL_PLANE);
-    seg.setMethodType(pcl::SAC_RANSAC);
-    // Max distance from the plane for a point to be considered part of it
-    seg.setDistanceThreshold(0.05);
 
     pcl::PointIndices::Ptr inlier_indices(new pcl::PointIndices);
     // Coefficients of the plane model
     pcl::ModelCoefficients::Ptr model_coefficients(new pcl::ModelCoefficients);
+
+    // Create the SAC segmentation object for ground plane extraction
+    pcl::SACSegmentation<pcl::PointXYZ> seg;
+    seg.setOptimizeCoefficients(false);
+    seg.setModelType(pcl::SACMODEL_PLANE);
+    seg.setMethodType(pcl::SAC_RANSAC);
+    // Max distance from the plane for a point to be considered part of it
+    seg.setDistanceThreshold(0.05);
 
     seg.setInputCloud(point_cloud);
     // Apply segmentation to obtain the indices of the ground points (inliers)
@@ -581,57 +583,67 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::ground_removal_filter(
     extract.setIndices(inlier_indices);
     // True to remove the ground points
     extract.setNegative(true);
-    extract.filter(*cloud_no_ground);
+    extract.filter(*filtered_point_cloud);
     
-    return cloud_no_ground;
+    return filtered_point_cloud;
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::interp_point_cloud(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr& point_cloud
 ) {
-    pcl::search::KdTree<pcl::PointXYZ> kdtree;
-    kdtree.setInputCloud(point_cloud);
-
-    pcl::PointCloud<pcl::PointXYZ>::Ptr interpolated_cloud(
+    pcl::PointCloud<pcl::PointXYZ>::Ptr interpolated_point_cloud(
         new pcl::PointCloud<pcl::PointXYZ>
     );
+    // Reserve space
+    interpolated_point_cloud->points.reserve(
+        point_cloud->points.size() * params_.interp_factor
+    );
 
-    for (size_t i = 0; i < point_cloud->points.size(); ++i) {
-        pcl::PointXYZ point = point_cloud->points[i];
+    pcl::search::KdTree<pcl::PointXYZ> kdtree;
+    kdtree.setInputCloud(point_cloud);
+    
+    int neighbors = 2;
+    int found_neighbors;
+    std::vector<int> k_indices;
+    std::vector<float> k_sqr_distances;
+    k_indices.reserve(neighbors);
+    k_sqr_distances.reserve(neighbors);
 
-        std::vector<int> point_indices;
-        std::vector<float> point_distances;
+    for (const auto& point : point_cloud->points) {
+        found_neighbors = 
+            kdtree.nearestKSearch(point, neighbors, k_indices, k_sqr_distances);
+        
+        if (found_neighbors < neighbors) continue;
 
-        kdtree.nearestKSearch(point, 2, point_indices, point_distances);
-
-        for (size_t j = 0; j < point_indices.size(); ++j) {
+        for (size_t k = 0; k < k_indices.size(); ++k) {
             const pcl::PointXYZ& neighbor =
-                point_cloud->points[point_indices[j]];
+                point_cloud->points[k_indices[k]];
 
-            if (point_distances[j] < 0.1) {
-                pcl::PointXYZ new_point;
-                new_point.x = (point.x + neighbor.x) / 2.0f; 
-                new_point.y = (point.y + neighbor.y) / 2.0f;
-                new_point.z = (point.z + neighbor.z) / 2.0f;
+            if (k_sqr_distances[k] < 0.1) {
+                pcl::PointXYZ new_point(
+                    (point.x + neighbor.x) / 2.0f,
+                    (point.y + neighbor.y) / 2.0f,
+                    (point.z + neighbor.z) / 2.0f
+                );
 
-                for (int k = 1; k < params_.interp_factor; ++k) {
+                for (int i = 1; i < params_.interp_factor; ++i) {
                     pcl::PointXYZ interp_point;
                     interp_point.x = 
-                        point.x + k * (new_point.x - point.x) / params_.interp_factor;
+                        point.x + i * (new_point.x - point.x) / params_.interp_factor;
                     interp_point.y = 
-                        point.y + k * (new_point.y - point.y) / params_.interp_factor;
+                        point.y + i * (new_point.y - point.y) / params_.interp_factor;
                     interp_point.z = 
-                        point.z + k * (new_point.z - point.z) / params_.interp_factor;
+                        point.z + i * (new_point.z - point.z) / params_.interp_factor;
                     
-                    interpolated_cloud->points.push_back(interp_point);
+                    interpolated_point_cloud->points.push_back(interp_point);
                 }
 
-                interpolated_cloud->points.push_back(new_point);
+                interpolated_point_cloud->points.push_back(new_point);
             }
         }
     }
 
-    return interpolated_cloud;
+    return interpolated_point_cloud;
 }
 
 #include "rclcpp_components/register_node_macro.hpp"
