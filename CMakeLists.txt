@@ -39,7 +39,6 @@ find_package(common_msgs REQUIRED)
 find_package(PCL REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV 4.5 REQUIRED)
-find_package(Armadillo 10.8 REQUIRED)
 
 if(BUILD_TESTING)
     find_package(ament_lint_auto REQUIRED)
@@ -57,7 +56,6 @@ endif()
 set(ONNXRUNTIME_LIB ${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so)
 
 include_directories(include
-    ${ARMADILLO_INCLUDE_DIRS}
     ${EIGEN3_INCLUDE_DIR}
     ${ONNXRUNTIME_ROOT}/include
     ${OpenCV_INCLUDE_DIRS}
@@ -78,7 +76,6 @@ rclcpp_components_register_node(
 )
 
 target_link_libraries(${PROJECT_NAME}
-    ${ARMADILLO_LIBRARIES}
     Eigen3::Eigen
     ${ONNXRUNTIME_LIB}
     ${OpenCV_LIBS}

@@ -392,12 +392,11 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     pcl::PointCloud<pcl::PointXYZ>::Ptr interpolated_point_cloud =
         interp_point_cloud(filtered_point_cloud);
 
-    Eigen::MatrixXf combined_matrix = camera_matrix_ * transformation_matrix_;
-
     std::unordered_map<int, std::vector<pcl::PointXYZ>> projection_map;
     Eigen::MatrixXf point_cloud_matrix(4, 1);
     Eigen::MatrixXf lidar_camera;
     int px, py;
+    
     for (const auto& point : interpolated_point_cloud->points) {
         
         point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
