@@ -155,19 +155,19 @@ private:
     /** Lidar-camera fusion parameters. */
     FusionParams params_;
     /** Сamera's intrinsic parameters matrix; camera calibration matrix. */
-    Eigen::MatrixXf camera_matrix_;
-    /** 
-     * Lidar-camera transformation (rotation and translation) matrix;
-     * extrinsic parameters between the sensors.
-     */
-    Eigen::MatrixXf transformation_matrix_;
+    Eigen::Matrix<float, 3, 4> camera_matrix_;
     /** Describes the rotation of the camera regarding the lidar sensor. */
-    Eigen::MatrixXf rotation_matrix_;
+    Eigen::Matrix<float, 3, 3> rotation_matrix_;
     /**
      * Represents the translation from lidar coordinates to camera
      * coordinates.
      */
-    Eigen::MatrixXf translation_matrix_;
+    Eigen::Matrix<float, 3, 1> translation_matrix_;
+        /** 
+     * Lidar-camera transformation (rotation and translation) matrix;
+     * extrinsic parameters between the sensors.
+     */
+    Eigen::Matrix<float, 4, 4> transformation_matrix_;
 
     /**
      * Finds the closest point of the cone relative to the lidar.

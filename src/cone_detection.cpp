@@ -108,7 +108,6 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     translation_matrix_ = translation_matrix_d.cast<float>();
     
     // Create transformation matrix
-    transformation_matrix_.resize(4,4);
     transformation_matrix_ <<
         rotation_matrix_(0), rotation_matrix_(3), rotation_matrix_(6), translation_matrix_(0),
         rotation_matrix_(1), rotation_matrix_(4), rotation_matrix_(7), translation_matrix_(1),
@@ -328,7 +327,7 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::filter_by_px_height
             filtered_cones.push_back(cone);
         }
     }
-
+    // copy ((
     return filtered_cones;
 }
 
@@ -337,18 +336,8 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     const sensor_msgs::msg::Image::ConstSharedPtr &image_msg,
     const std::vector<std::pair<std::string, cv::Rect>> &detected_cones
 ) {
-    int img_width = static_cast<int>(image_msg->width);
-    int int_height = static_cast<int>(image_msg->height);
     // The closest point to each cone
     std::vector<std::pair<std::string, pcl::PointXYZ>> closest_points;
-
-    std::vector<ConeInfo> cone_infos;
-    for (const auto& cone : detected_cones) {
-        ConeInfo info;
-        info.id = cone.first;
-        info.bbox = cone.second;
-        cone_infos.push_back(info);
-    }
 
     // Convert ROS image_msg to CV image
     cv_bridge::CvImagePtr cv_image_ptr;
@@ -398,12 +387,13 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         interp_point_cloud(filtered_point_cloud);
 
     std::unordered_map<int, std::vector<pcl::PointXYZ>> projection_map;
-    Eigen::MatrixXf point_cloud_matrix(4, 1);
-    Eigen::MatrixXf lidar_camera;
+    Eigen::Matrix<float, 4, 1> point_cloud_matrix;
+    Eigen::Matrix<float, 3, 1> lidar_camera;
     int px, py;
+    int img_width = static_cast<int>(image_msg->width);
+    int int_height = static_cast<int>(image_msg->height);
 
     for (const auto& point : interpolated_point_cloud->points) {
-        
         point_cloud_matrix << -point.y, -point.z, point.x, 1.0;
 
         lidar_camera = camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
@@ -415,6 +405,14 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
             int idx = py * img_width + px; 
             projection_map[idx].push_back(point);
         }
+    }
+    
+    std::vector<ConeInfo> cone_infos;
+    for (const auto& cone : detected_cones) {
+        ConeInfo info;
+        info.id = cone.first;
+        info.bbox = cone.second;
+        cone_infos.push_back(info);
     }
     
     for (auto& cone : cone_infos) {
