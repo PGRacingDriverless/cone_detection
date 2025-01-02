@@ -44,14 +44,34 @@ std::vector<ModelResult> Model::detect(const cv::Mat& img) {
     std::vector<ModelResult> res{};
 
     try {
+    auto start = std::chrono::high_resolution_clock::now();
         // Preprocess image
         cv::Mat processed_img = letterboxing(img);
-        
-        blob_from_image(processed_img);
-        
-        auto output_tensors = create_tensor_and_run();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = 
+    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "Preprocess time: " << duration.count() << std::endl;
 
+    start = std::chrono::high_resolution_clock::now();
+        blob_from_image(processed_img);
+    end = std::chrono::high_resolution_clock::now();
+    duration = 
+    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "blob time: " << duration.count() << std::endl;    
+
+    start = std::chrono::high_resolution_clock::now();
+        auto output_tensors = create_tensor_and_run();
+    end = std::chrono::high_resolution_clock::now();
+    duration = 
+    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "create_tensor_and_run time: " << duration.count() << std::endl;   
+
+    start = std::chrono::high_resolution_clock::now();
         res = process_output_tensors(output_tensors);
+    end = std::chrono::high_resolution_clock::now();
+    duration = 
+    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "process_output_tensors time: " << duration.count() << std::endl;   
     }
     catch (const std::exception& e) {
         RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Model: %s", e.what());
@@ -64,12 +84,17 @@ void Model::blob_from_image(const cv::Mat& img) {
     int channels = img.channels();
     int height = img.rows;
     int width = img.cols;
+    // Pointer to the raw data of the img
+    const uint8_t* img_data = img.data;
 
+    // The order matters because of cv::Mat memory layout!
+    // Changing the order of loops slow down this function!
     for (int c = 0; c < channels; c++) {
         for (int h = 0; h < height; h++) {
             for (int w = 0; w < width; w++) {
+                // Direct access to the pixel data
                 blob[c * width * height + h * width + w] =
-                    (img.at<cv::Vec3b>(h, w)[c]) / 255.0f;
+                    img_data[(h * width + w) * channels + c] / 255.0f;
             }
         }
     }
