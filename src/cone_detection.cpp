@@ -164,7 +164,7 @@ void ConeDetection::cone_detection_callback(
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = 
     std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "Detection time: " << duration.count() << std::endl;
+    //std::cout << "Detection time: " << duration.count() << std::endl;
 
     // Filter detected cones
     detected_cones = filter_by_px_height(detected_cones);
@@ -178,7 +178,7 @@ void ConeDetection::cone_detection_callback(
     end = std::chrono::high_resolution_clock::now();
     duration = 
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "Fusion time: " << duration.count() << std::endl;
+    //std::cout << "Fusion time: " << duration.count() << std::endl;
 
 #ifndef NDEBUG
     int cone_marker_id_ = 0;

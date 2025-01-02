@@ -50,28 +50,28 @@ std::vector<ModelResult> Model::detect(const cv::Mat& img) {
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = 
     std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "Preprocess time: " << duration.count() << std::endl;
+    //std::cout << "Preprocess time: " << duration.count() << std::endl;
 
     start = std::chrono::high_resolution_clock::now();
         blob_from_image(processed_img);
     end = std::chrono::high_resolution_clock::now();
     duration = 
     std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "blob time: " << duration.count() << std::endl;    
+    //std::cout << "blob time: " << duration.count() << std::endl;    
 
     start = std::chrono::high_resolution_clock::now();
         auto output_tensors = create_tensor_and_run();
     end = std::chrono::high_resolution_clock::now();
     duration = 
     std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "create_tensor_and_run time: " << duration.count() << std::endl;   
+    //std::cout << "create_tensor_and_run time: " << duration.count() << std::endl;   
 
     start = std::chrono::high_resolution_clock::now();
         res = process_output_tensors(output_tensors);
     end = std::chrono::high_resolution_clock::now();
     duration = 
     std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "process_output_tensors time: " << duration.count() << std::endl;   
+    //std::cout << "process_output_tensors time: " << duration.count() << std::endl;   
     }
     catch (const std::exception& e) {
         RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Model: %s", e.what());
