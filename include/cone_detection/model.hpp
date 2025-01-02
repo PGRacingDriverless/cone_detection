@@ -4,6 +4,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <opencv2/opencv.hpp>
 #include "onnxruntime_cxx_api.h"
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -67,25 +69,15 @@ class Model {
 public:
     /**
      * Constructor.
-     */
-    Model();
-
-    /**
-     * Destructor. Clears the memory allocated for the session.
-     */
-    ~Model();
-
-    /**
      * Model initialization. Creates an Ort::Session with the passed
      * options and params. Gets names of input and output nodes
      * (`get_node_names()`) and warms up (`warm_up()`) the model inside
      * the function.
      * @param options Options to customize the session.
      * @param params Model parameters.
-     * @return True on success, false on failure.
      * @note params.model_path can only include English letters and numbers.
      */
-    bool init(const SessionOptions& options, const ModelParams& params);
+    Model(const SessionOptions& options, const ModelParams& params);
 
     /**
      * Detects objects in the image.
@@ -101,29 +93,28 @@ public:
      * Gets class name from `Model.classes_` by id.
      * @param class_id id of the class.
      * @return Returns the `std::string` class name under the given id.
-     * @todo This is a public function, so it's worth doing some kind of
-     * check for invalid id's. It is public because we are now using it to
-     * display class names in RViz2.
+     * @note It is public because we are now using it to display class
+     * names in RViz2.
      */
     std::string get_class_by_id(int class_id);
 private:
-    /**
-     * Creates a blob (binary large object) from the image.
-     * @param img image from which we will make a blob.
-     * @param blob reference to the blob pointer. A blob of the image will
-     * be stored here.
-     * @todo Idk why we don't use blobfromImage() from the cv2 library.
-     */
-    void blob_from_image(const cv::Mat& img, float*& blob);
+    /** A blob of the image will be stored here. */
+    std::unique_ptr<float[]> blob;
 
     /**
-     * Creates a tensor from the blob and runs the model (in a session)
+     * Creates a blob (binary large object) from the image and writes
+     * to class member `blob`.
+     * @param img image from which we will make a blob.
+     * @todo Idk why we don't use blobfromImage() from the cv2 library.
+     */
+    void blob_from_image(const cv::Mat& img);
+
+    /**
+     * Creates a tensor from the `blob` and runs the model (in a session)
      * with this tensor as input.
-     * @param blob Reference to the blob pointer (with a blob data of an
-     * image).
      * @return A vector of output tensors.
      */
-    std::vector<Ort::Value> create_tensor_and_run(float*& blob);
+    std::vector<Ort::Value> create_tensor_and_run();
 
     /**
      * Gets names of input and output nodes from the model using a session
@@ -162,7 +153,7 @@ private:
     /** Contains the process-global ONNX Runtime environment. */
     Ort::Env env_;
     /** Loads and runs the model. */
-    Ort::Session* session_;
+    std::unique_ptr<Ort::Session> session_;
     /** A set of configurations for inference run behavior. */
     Ort::RunOptions options_;
     //** Input names obtained from the model in the function `get_node_names()` */

@@ -2,7 +2,7 @@
 #define CONE_DETECTION_HPP
 
 // Show debug data in release and debug modes
-//#undef NDEBUG
+#undef NDEBUG
 
 #include <rclcpp/rclcpp.hpp>
 // Matrix manipulations
@@ -14,16 +14,11 @@
 #include <pcl/filters/filter.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/passthrough.h>
-#include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/search/kdtree.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl_conversions/pcl_conversions.h>
-// Range image
-#include <pcl/range_image/range_image_spherical.h>
-#include <pcl/range_image/range_image.h>
-// Interpolation
-#include <armadillo>
 // Synchronization of messages from camera and lidar
 #include <rclcpp/qos.hpp>
 #include <message_filters/subscriber.h>
@@ -69,26 +64,12 @@ struct ConeInfo {
  * this distance are filtered out.
  * @param min_len Minimum distance for the point cloud. Points closer than
  * this distance are filtered out.
- * @param max_fov Maximum field of view. For interpolation.
- * @param min_fov Minimum field of view For interpolation.
- * @param ang_res_x Angular resolution x. For interpolation.
- * @param ang_res_y Angular resolution y. For interpolation.
- * @param max_ang_w Maximum angle width. For interpolation.
- * @param max_ang_h Maximum angle height. For interpolation.
- * @param interp_value For interpolation.
- * @param max_var Maximum variance for variance filtering.
+ * @param interp_factor Interpolation factor.
  */
 typedef struct {
     float max_len;
     float min_len;
-    float max_fov;
-    float min_fov;
-    float ang_res_x;
-    float ang_res_y;
-    float max_ang_w;
-    float max_ang_h;
-    float interp_value;
-    float max_var;
+    float interp_factor;
 } FusionParams;
 
 /**
@@ -129,10 +110,6 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_point_cloud_publisher_;
     /** Publishes interpolated point cloud. */
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr interp_point_cloud_publisher_;
-    /** Publishes range image. */
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr range_img_publisher_;
-    /** Publishes point cloud from range image. */
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr range_img_cloud_publisher_;
     /** Publishes a point cloud from overlaid on the camera image. */
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr point_cloud_on_img_publisher_;
 #endif
@@ -158,48 +135,46 @@ private:
      * converting an `Image` message to `OpenCV` readable format.
      * @return vector of pairs of cone class name and cone box (`cv::Rect`).
      */
-    std::vector<std::pair<std::string, cv::Rect>> camera_cones_detect(
+    std::vector<std::pair<std::string, cv::Rect>> detect_cones_on_img(
         cv_bridge::CvImagePtr cv_image_ptr
     );
 
     /** Height threshold in pixels for distance filtering. */
     int height_in_pixels;
 
-    /** The current dynamic event (mission). Check launch file for additional information */
-    std::string mission_;
-
     /**
-     * Filter cones by `cv::Rect` box height in pixels.
+     * Filters cones by `cv::Rect` box height in pixels.
      * @param detected_cones vector of pairs of cone class name and cone
      * box (`cv::Rect`) for filtering.
+     * @return filtered vector of pairs.
      */
-    void filter_by_px_height(
-        std::vector<std::pair<std::string, cv::Rect>> &detected_cones
+    std::vector<std::pair<std::string, cv::Rect>> filter_by_px_height(
+        const std::vector<std::pair<std::string, cv::Rect>> &detected_cones
     );
 
     /** Lidar-camera fusion parameters. */
     FusionParams params_;
     /** Сamera's intrinsic parameters matrix; camera calibration matrix. */
-    Eigen::MatrixXf camera_matrix_;
-    /** 
-     * Lidar-camera transformation (rotation and translation) matrix;
-     * extrinsic parameters between the sensors.
-     */
-    Eigen::MatrixXf transformation_matrix_;
+    Eigen::Matrix<float, 3, 4> camera_matrix_;
     /** Describes the rotation of the camera regarding the lidar sensor. */
-    Eigen::MatrixXf rotation_matrix_;
+    Eigen::Matrix<float, 3, 3> rotation_matrix_;
     /**
      * Represents the translation from lidar coordinates to camera
      * coordinates.
      */
-    Eigen::MatrixXf translation_matrix_;
+    Eigen::Matrix<float, 3, 1> translation_matrix_;
+        /** 
+     * Lidar-camera transformation (rotation and translation) matrix;
+     * extrinsic parameters between the sensors.
+     */
+    Eigen::Matrix<float, 4, 4> transformation_matrix_;
 
     /**
      * Finds the closest point of the cone relative to the lidar.
      * @param point_cloud_msg `PointCloud2` from lidar.
      * @param image_msg `Image` from camera.
      * @param detected_cones vector of pairs of cone class name and cone
-     * box (`cv::Rect`) received from `camera_cones_detect()`.
+     * box (`cv::Rect`) received from `detect_cones_on_img()`.
      * @return vector of pairs of cone class name and cone closest point
      * (`pcl::PointXYZ`).
      */
@@ -210,7 +185,7 @@ private:
     );
 
     /**
-     * Point cloud distance-based filtering. 
+     * Filters point cloud based on min and max distances from config. 
      * @param point_cloud point cloud for filtering.
      * @return filtered point cloud.
      */
@@ -219,9 +194,9 @@ private:
     );
 
     /**
-     * Point cloud ground removal filtering.
-     * @param point_cloud point cloud for filtering.
-     * @return filtered point cloud.
+     * Removes ground from point cloud using SAC segmentation.
+     * @param point_cloud point cloud for ground removing.
+     * @return point cloud without ground.
      * @todo move distance threshold to config.
      */
     pcl::PointCloud<pcl::PointXYZ>::Ptr ground_removal_filter(
@@ -229,35 +204,18 @@ private:
     );
 
     /**
-     * Interpolates range image.
-     * @param range_img Range image for interpolation.
-     * @param range_matrix_interp matrix of interpolated range values.
-     * @param height_matrix_interp matrix of interpolated heights (z-axis values).
+     * Interpolates point cloud. Uses KdTree to perform nearest-neighbor
+     * searches for interpolation between points in point cloud.
+     * @param point_cloud point cloud for interpolation.
+     * @return interpolated point cloud.
+     * @todo move neighbors number to config.
      */
-    void interp_range_img(
-        const pcl::RangeImageSpherical::Ptr &range_img,
-        arma::mat &range_matrix_interp,
-        arma::mat &height_matrix_interp
-    );
-
-    /**
-     * Variance filtering for range matrix.
-     * @param range_matrix_interp matrix of interpolated range values.
-     * @return filtered range matrix.
-     */
-    arma::mat variance_filter(
-        const arma::mat &range_matrix_interp
-    );
-
-    /**
-     * Statistical outlier removal filtering for point cloud.
-     * @param point_cloud point cloud for filtering.
-     * @return filtered point cloud.
-     * @todo move  to config.
-     */
-    pcl::PointCloud<pcl::PointXYZ>::Ptr sor_filter(
+    pcl::PointCloud<pcl::PointXYZ>::Ptr interp_point_cloud(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr &point_cloud
     );
+
+    /** The current dynamic event (mission). */
+    std::string mission_;
 };
 
 #endif
