@@ -406,7 +406,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     std::unordered_map<int, std::vector<pcl::PointXYZ>> projection_map;
     Eigen::Matrix<float, 4, 1> point_cloud_matrix;
     Eigen::Matrix<float, 3, 1> lidar_camera;
-    int px, py;
+    int px, py, idx;
     int img_width = static_cast<int>(image_msg->width);
     int int_height = static_cast<int>(image_msg->height);
 
@@ -420,14 +420,14 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
                 this->get_logger(),
                 "lidar_camera_fusion: lidar_camera(2, 0) is zero!"
             );
-            return closest_points;
+            continue;
         }
 
         px = static_cast<int>(lidar_camera(0, 0) / lidar_camera(2, 0));
         py = static_cast<int>(lidar_camera(1, 0) / lidar_camera(2, 0));
 
         if (px >= 0 && px < img_width && py >= 0 && py < int_height) {
-            int idx = py * img_width + px; 
+            idx = py * img_width + px; 
             projection_map[idx].push_back(point);
         }
     }
@@ -445,7 +445,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
 
         for (int y = search_area.y; y < search_area.y + search_area.height; ++y) {
             for (int x = search_area.x; x < search_area.x + search_area.width; ++x) {
-                int idx = y * img_width + x;
+                idx = y * img_width + x;
                 if (projection_map.count(idx)) {
                     cone.associated_points.insert(
                         cone.associated_points.end(),
@@ -485,7 +485,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         if (cone.associated_points.empty()) continue;
 
         pcl::PointXYZ sum(0, 0, 0);
-        double min_distance = std::numeric_limits<double>::max();
+        double min_sqr_dist = std::numeric_limits<double>::max();
         pcl::PointXYZ closest_point;
 
         for (const auto& p : cone.associated_points) {
@@ -493,14 +493,13 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
             sum.y += p.y;
             sum.z += p.z;
 
-            double distance = std::sqrt(
+            double sqr_dist = 
                 std::pow(p.x - cone.average_point.x, 2) +
                 std::pow(p.y - cone.average_point.y, 2) +
-                std::pow(p.z - cone.average_point.z, 2)
-            );
+                std::pow(p.z - cone.average_point.z, 2);
 
-            if (distance < min_distance) {
-                min_distance = distance;
+            if (sqr_dist < min_sqr_dist) {
+                min_sqr_dist = sqr_dist;
                 closest_point = p;
             }
         }
@@ -514,13 +513,13 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
 
     for (size_t i = 0; i < closest_points.size(); ++i) {
         for (size_t j = i + 1; j < closest_points.size(); ++j) {
-            double distance = std::sqrt(
+            double sqr_dist = 
                 std::pow(closest_points[i].second.x - closest_points[j].second.x, 2) +
                 std::pow(closest_points[i].second.y - closest_points[j].second.y, 2) +
-                std::pow(closest_points[i].second.z - closest_points[j].second.z, 2)
-            );
-
-            if (distance < 2.0) {
+                std::pow(closest_points[i].second.z - closest_points[j].second.z, 2);
+            
+            // Comparing squared distances
+            if (sqr_dist < 4.0) {
                 closest_points.erase(closest_points.begin() + j);
                 --i;
                 break;
