@@ -6,6 +6,7 @@
 #include "onnxruntime_cxx_api.h"
 #include <memory>
 #include <stdexcept>
+#include <stdint.h>
 #include <string>
 #include <vector>
 

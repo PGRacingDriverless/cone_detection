@@ -2,6 +2,12 @@
 
 Model::Model(const SessionOptions& options, const ModelParams& params) {
     try {
+        if (params.img_size.at(0) <= 0 || params.img_size.at(1) <= 0) {
+            throw std::invalid_argument(
+                "Model: invalid img size provided in params."
+            );
+        }
+
         // Set options used to construct session
         Ort::SessionOptions session_options;
         if (options.cuda_enable) {
@@ -36,45 +42,35 @@ Model::Model(const SessionOptions& options, const ModelParams& params) {
         warm_up();
     }
     catch (const std::exception& e) {
-        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Model: %s", e.what());
+        RCLCPP_ERROR(
+            rclcpp::get_logger("cone_detection"),
+            "Model: %s", e.what()
+        );
     }
 }
 
 std::vector<ModelResult> Model::detect(const cv::Mat& img) {
     std::vector<ModelResult> res{};
 
+    if (img.empty() || img.rows == 0 || img.cols == 0) {
+        RCLCPP_ERROR(
+            rclcpp::get_logger("cone_detection"),
+            "detect: input img is empty or has zero dims."
+        );
+        return res;
+    }
+
     try {
-    auto start = std::chrono::high_resolution_clock::now();
-        // Preprocess image
         cv::Mat processed_img = letterboxing(img);
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = 
-    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    //std::cout << "Preprocess time: " << duration.count() << std::endl;
-
-    start = std::chrono::high_resolution_clock::now();
         blob_from_image(processed_img);
-    end = std::chrono::high_resolution_clock::now();
-    duration = 
-    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    //std::cout << "blob time: " << duration.count() << std::endl;    
-
-    start = std::chrono::high_resolution_clock::now();
         auto output_tensors = create_tensor_and_run();
-    end = std::chrono::high_resolution_clock::now();
-    duration = 
-    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    //std::cout << "create_tensor_and_run time: " << duration.count() << std::endl;   
-
-    start = std::chrono::high_resolution_clock::now();
         res = process_output_tensors(output_tensors);
-    end = std::chrono::high_resolution_clock::now();
-    duration = 
-    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    //std::cout << "process_output_tensors time: " << duration.count() << std::endl;   
     }
     catch (const std::exception& e) {
-        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Model: %s", e.what());
+        RCLCPP_ERROR(
+            rclcpp::get_logger("cone_detection"),
+            "detect: %s", e.what()
+        );
     }
 
     return res;
@@ -85,6 +81,7 @@ void Model::blob_from_image(const cv::Mat& img) {
     int height = img.rows;
     int width = img.cols;
     // Pointer to the raw data of the img
+    // Same as uchar* from OpenCV docs
     const uint8_t* img_data = img.data;
 
     // The order matters because of cv::Mat memory layout!
@@ -187,6 +184,8 @@ cv::Mat Model::letterboxing(const cv::Mat& img) {
 
     // Letter-boxing itself
     if (img.cols >= img.rows) {
+        // img_size is checked at model initialization!
+        // img.cols is checked in detect function that calls letterboxing!
         resize_scale_ = img.cols / (float)params_.img_size.at(0);
         cv::resize(
             res_img,
@@ -195,6 +194,8 @@ cv::Mat Model::letterboxing(const cv::Mat& img) {
         );
     }
     else {
+        // img_size is checked at model initialization!
+        // img.rows is checked in detect function that calls letterboxing!
         resize_scale_ = img.rows / (float)params_.img_size.at(1);
         cv::resize(
             res_img,

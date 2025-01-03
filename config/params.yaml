@@ -35,7 +35,7 @@
         # Lidar-Camera fusion params
         max_len: 26.0
         min_len: 0.01
-        interp_factor: 3.0
+        interp_factor: 3
         # Lidar-Camera fusion matrices
         camera_matrix: [
             640.0, 0.0  , 640.0, 0.0,

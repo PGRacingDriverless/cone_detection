@@ -83,7 +83,23 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     
     params_.max_len = this->declare_parameter<float>("max_len");
     params_.min_len = this->declare_parameter<float>("min_len");
-    params_.interp_factor = this->declare_parameter<float>("interp_factor");
+    params_.interp_factor = this->declare_parameter<int>("interp_factor");
+
+    if (params_.interp_factor <= 0) {
+        RCLCPP_ERROR(
+            this->get_logger(),
+            "ConeDetection: interp_factor must be positive. Set to 1."
+        );
+        params_.interp_factor = 1;
+    }
+
+    if (params_.max_len <= 0.0f) {
+        RCLCPP_ERROR(
+            this->get_logger(),
+            "ConeDetection: max_len must be positive. Set to 10 meters."
+        );
+        params_.max_len = 10.0f;
+    }
 
     // Read and set matrices for lidar-camera fusion
     std::vector<double> temp_matrix_vec = 
@@ -118,6 +134,7 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     // Calculate height threshold in pixels for distance filtering
     // distance = height_real * focal_length / height_pixel
     float cone_height = 0.35;
+    // max_len is checked at node initialization!
     height_in_pixels = static_cast<int>(std::ceil(
         (cone_height * camera_matrix_.coeff(1, 1)) / params_.max_len
     ));
@@ -398,6 +415,14 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
 
         lidar_camera = camera_matrix_ * (transformation_matrix_ * point_cloud_matrix);
 
+        if (lidar_camera(2, 0) == 0.0f) {
+            RCLCPP_ERROR(
+                this->get_logger(),
+                "lidar_camera_fusion: lidar_camera(2, 0) is zero!"
+            );
+            return closest_points;
+        }
+
         px = static_cast<int>(lidar_camera(0, 0) / lidar_camera(2, 0));
         py = static_cast<int>(lidar_camera(1, 0) / lidar_camera(2, 0));
 
@@ -594,6 +619,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::interp_point_cloud(
     );
     // Reserve space
     interpolated_point_cloud->points.reserve(
+        // interp_factor is checked at node initialization!
         point_cloud->points.size() * params_.interp_factor
     );
 
@@ -626,6 +652,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ConeDetection::interp_point_cloud(
 
                 for (int i = 1; i < params_.interp_factor; ++i) {
                     pcl::PointXYZ interp_point;
+                    // interp_factor is checked at node initialization!
                     interp_point.x = 
                         point.x + i * (new_point.x - point.x) / params_.interp_factor;
                     interp_point.y = 

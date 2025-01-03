@@ -69,7 +69,7 @@ struct ConeInfo {
 typedef struct {
     float max_len;
     float min_len;
-    float interp_factor;
+    int interp_factor;
 } FusionParams;
 
 /**
