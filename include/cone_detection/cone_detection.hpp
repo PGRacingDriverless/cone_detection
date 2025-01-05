@@ -2,7 +2,7 @@
 #define CONE_DETECTION_HPP
 
 // Show debug data in release and debug modes
-#undef NDEBUG
+//#undef NDEBUG
 
 #include <rclcpp/rclcpp.hpp>
 // Matrix manipulations
@@ -110,8 +110,6 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_point_cloud_publisher_;
     /** Publishes interpolated point cloud. */
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr interp_point_cloud_publisher_;
-    /** Publishes a point cloud from overlaid on the camera image. */
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr point_cloud_on_img_publisher_;
 #endif
 
     /**
