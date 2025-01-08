@@ -84,6 +84,7 @@ public:
      */
     ConeDetection(const rclcpp::NodeOptions &node_options);
 private:
+    float cone_height_;
     /** Lidar point cloud topic name. Can be changed in `params.yaml`. */
     std::string lidar_points_topic_;
     /** Сamera image topic тame. Can be changed in `params.yaml`. */
