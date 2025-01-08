@@ -32,6 +32,7 @@
         cuda_enable: true
         log_severity_level: 3
         intra_op_num_threads: 1
+        cone_height: 0.35
         # Lidar-Camera fusion params
         max_len: 26.0
         min_len: 0.01

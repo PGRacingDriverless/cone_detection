@@ -80,7 +80,7 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
 
     model_ = std::make_shared<Model>(options, params);
 
-    
+    cone_height_ = this->declare_parameter<float>("cone_height");
     params_.max_len = this->declare_parameter<float>("max_len");
     params_.min_len = this->declare_parameter<float>("min_len");
     params_.interp_factor = this->declare_parameter<int>("interp_factor");
@@ -133,10 +133,9 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
 
     // Calculate height threshold in pixels for distance filtering
     // distance = height_real * focal_length / height_pixel
-    float cone_height = 0.35;
     // max_len is checked at node initialization!
     height_in_pixels = static_cast<int>(std::ceil(
-        (cone_height * camera_matrix_.coeff(1, 1)) / params_.max_len
+        (cone_height_ * camera_matrix_.coeff(1, 1)) / params_.max_len
     ));
 
 
