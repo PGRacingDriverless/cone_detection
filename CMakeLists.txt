@@ -66,7 +66,7 @@ ament_auto_find_build_dependencies()
 
 ament_auto_add_library(${PROJECT_NAME} SHARED
     src/${PROJECT_NAME}.cpp
-    src/model.cpp
+    src/modelONNX.cpp
 )
 
 rclcpp_components_register_node(

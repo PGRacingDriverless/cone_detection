@@ -30,7 +30,7 @@
 #include "common_msgs/msg/cone_array.hpp"
 #include "common_msgs/msg/cone.hpp"
 // Image detection using a model
-#include "model.hpp"
+#include "modelONNX.hpp"
 // Standard
 #include <limits>
 #include <cmath>
