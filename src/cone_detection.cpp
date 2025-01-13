@@ -460,7 +460,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         if (cone.associated_points.empty()) continue;
 
         pcl::PointXYZ sum(0, 0, 0);
-        double min_sqr_dist = std::numeric_limits<double>::max();
+        float min_sqr_dist = std::numeric_limits<float>::max();
         pcl::PointXYZ closest_point;
 
         for (const auto& p : cone.associated_points) {
@@ -468,7 +468,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
             sum.y += p.y;
             sum.z += p.z;
 
-            double sqr_dist = 
+            float sqr_dist = 
                 std::pow(p.x - cone.average_point.x, 2) +
                 std::pow(p.y - cone.average_point.y, 2) +
                 std::pow(p.z - cone.average_point.z, 2);
@@ -489,7 +489,7 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
     // Remove cones that closer than 2 m of each other
     for (size_t i = 0; i < closest_points.size(); ++i) {
         for (size_t j = i + 1; j < closest_points.size(); ++j) {
-            double sqr_dist = 
+            float sqr_dist = 
                 std::pow(closest_points[i].second.x - closest_points[j].second.x, 2) +
                 std::pow(closest_points[i].second.y - closest_points[j].second.y, 2) +
                 std::pow(closest_points[i].second.z - closest_points[j].second.z, 2);

@@ -54,7 +54,7 @@ struct ConeInfo {
     cv::Rect bbox;
     std::vector<pcl::PointXYZ> associated_points;
     pcl::PointXYZ average_point;
-    double confidence;
+    float confidence;
 };
 
 /**
