@@ -140,7 +140,7 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
 
 
     detected_cones_publisher_ = 
-        this->create_publisher<common_msgs::msg::ConeArray>("cone_array", 5);
+        this->create_publisher<common_msgs::msg::ConeArray>("cone_detection/cone_array", 5);
 
     // Debug publishers
 #ifndef NDEBUG
