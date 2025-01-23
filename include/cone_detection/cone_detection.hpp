@@ -2,7 +2,7 @@
 #define CONE_DETECTION_HPP
 
 // Show debug data in release and debug modes
-//#undef NDEBUG
+#undef NDEBUG
 
 #include <rclcpp/rclcpp.hpp>
 // Matrix manipulations
@@ -31,6 +31,9 @@
 #include "common_msgs/msg/cone.hpp"
 // Image detection using a model
 #include "model.hpp"
+// From common
+#include "common/cone.hpp"
+#include "common/viz.hpp"
 // Standard
 #include <limits>
 #include <cmath>

@@ -22,6 +22,7 @@
     <depend>visualization_msgs</depend>
     <depend>cv_bridge</depend>
     <depend>common_msgs</depend>
+    <depend>common</depend>
 
     <exec_depend>ament_index_python</exec_depend>
     <exec_depend>launch</exec_depend>

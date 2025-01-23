@@ -210,11 +210,21 @@ void ConeDetection::cone_detection_callback(
         cone_msg.y = cone_closest_point.y;
 
         if (pair.first == "blue_cone") {
-            cone_msg.side = 1;
-        } else if(pair.first == "yellow_cone") {
-            cone_msg.side = 0;
-        } else {
-            continue;
+            cone_msg.side = Side::LEFT;
+            cone_msg.color = Color::BLUE;
+        } 
+        else if (pair.first == "yellow_cone") {
+            cone_msg.side = Side::RIGHT;
+            cone_msg.color = Color::YELLOW;
+        }
+        else if (pair.first == "orange_cone") {
+            cone_msg.color = Color::ORANGE;
+        } 
+        else if (pair.first == "large_orange_cone") {
+            cone_msg.color = Color::LARGE_ORANGE;
+        }
+        else {
+            continue; // Unknown cone
         }
 
         // Add a cone to the cone_array in the message
@@ -248,16 +258,22 @@ void ConeDetection::cone_detection_callback(
         cone_marker_msg.action = visualization_msgs::msg::Marker::ADD;
         cone_marker_msg.pose = pose;
         cone_marker_msg.scale = vector3;
-        if (cone_msg.side == 1) {
-            cone_marker_msg.color.r = 0.0;
-            cone_marker_msg.color.g = 0.0;
-            cone_marker_msg.color.b = 1.0;
-        } else if (cone_msg.side == 0) {
-            cone_marker_msg.color.r = 0.96;
-            cone_marker_msg.color.g = 0.94;
-            cone_marker_msg.color.b = 0.06;
+        // Set marker color
+        if (cone_msg.color == Color::BLUE) {
+            cone_marker_msg.color = VIZ_BLUE;
+        } 
+        else if (cone_msg.color == Color::YELLOW) {
+            cone_marker_msg.color = VIZ_YELLOW;
         }
-        cone_marker_msg.color.a = 1.0;
+        else if (cone_msg.color == Color::ORANGE) {
+            cone_marker_msg.color = VIZ_ORANGE;
+        } 
+        else if (cone_msg.color == Color::LARGE_ORANGE) {
+            cone_marker_msg.color = VIZ_ORANGE;
+        }
+        else {
+            cone_marker_msg.color = VIZ_GRAY;
+        }
         cone_marker_msg.lifetime = 
             rclcpp::Duration(std::chrono::milliseconds(500));
         cone_marker_msg.frame_locked = false;
@@ -486,22 +502,23 @@ std::vector<std::pair<std::string, pcl::PointXYZ>> ConeDetection::lidar_camera_f
         closest_points.push_back(std::make_pair(cone.id, closest_point));
     }
 
+    // MAYBE USELESS NOW
     // Remove cones that closer than 2 m of each other
-    for (size_t i = 0; i < closest_points.size(); ++i) {
-        for (size_t j = i + 1; j < closest_points.size(); ++j) {
-            float sqr_dist = 
-                std::pow(closest_points[i].second.x - closest_points[j].second.x, 2) +
-                std::pow(closest_points[i].second.y - closest_points[j].second.y, 2) +
-                std::pow(closest_points[i].second.z - closest_points[j].second.z, 2);
+    // for (size_t i = 0; i < closest_points.size(); ++i) {
+    //     for (size_t j = i + 1; j < closest_points.size(); ++j) {
+    //         float sqr_dist = 
+    //             std::pow(closest_points[i].second.x - closest_points[j].second.x, 2) +
+    //             std::pow(closest_points[i].second.y - closest_points[j].second.y, 2) +
+    //             std::pow(closest_points[i].second.z - closest_points[j].second.z, 2);
             
-            // Comparing squared distances, 2.0 m
-            if (sqr_dist < 4.0) {
-                closest_points.erase(closest_points.begin() + j);
-                --i;
-                break;
-            }
-        }
-    }
+    //         // Comparing squared distances, 2.0 m
+    //         if (sqr_dist < 4.0) {
+    //             closest_points.erase(closest_points.begin() + j);
+    //             --i;
+    //             break;
+    //         }
+    //     }
+    // }
 
 #ifndef NDEBUG
     sensor_msgs::msg::PointCloud2 temp_cloud;

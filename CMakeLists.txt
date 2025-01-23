@@ -34,11 +34,12 @@ find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 
-find_package(common_msgs REQUIRED)
-
 find_package(PCL REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV 4.5 REQUIRED)
+
+find_package(common_msgs REQUIRED)
+find_package(common REQUIRED)
 
 if(BUILD_TESTING)
     find_package(ament_lint_auto REQUIRED)
