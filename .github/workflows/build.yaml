@@ -23,7 +23,7 @@ jobs:
             - name: Install dependencies
               run: |
                 sudo apt-get update
-                sudo apt-get install cmake libarmadillo-dev libopencv-dev ros-humble-cv-bridge ros-humble-pcl-ros
+                sudo apt-get install cmake liblemon-dev libarmadillo-dev libopencv-dev ros-humble-cv-bridge ros-humble-pcl-ros
             - name: Install ONNX Runtime
               run: |
                 sudo apt-get update
