@@ -49,4 +49,4 @@ jobs:
               run: |
                 source /opt/ros/humble/setup.bash
                 cd ws/
-                colcon build --symlink-install --packages-select cone_detection common_msgs --cmake-args -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
+                colcon build --symlink-install --packages-select cone_detection common common_msgs --cmake-args -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
