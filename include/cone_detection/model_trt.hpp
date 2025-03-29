@@ -5,6 +5,14 @@
 #include <NvInfer.h>
 #include <NvOnnxParser.h>
 #include <cuda_runtime.h>
+#include <opencv2/cudaarithm.hpp>
+#include <opencv2/cudaimgproc.hpp>
+#include <opencv2/cudawarping.hpp>
+#include <opencv2/opencv.hpp>
+#include <cuda_fp16.h>
+#include "NvInfer.h"
+
+
 
 #include <memory>
 #include <vector>
@@ -40,11 +48,19 @@ public:
     std::vector<ModelResult> detect(const cv::Mat& inputImage);
     std::string get_class_by_id(int class_id);
     [[nodiscard]] const std::vector<nvinfer1::Dims3> &getInputDims() const { return m_inputDims; };
+    [[nodiscard]] const std::vector<nvinfer1::Dims> &getOutputDims() const { return m_outputDims; };
 private:
     bool buildEngine();
     bool loadEngine();
     std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const cv::cuda::GpuMat& gpuImg);
-    std::vector<ModelResult> postprocess(const std::vector<float>& output);
+    std::vector<ModelResult> postprocessDetect(std::vector<float> &featureVector);
+
+    bool runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inputs, std::vector<float> &featureVector);
+
+    static cv::cuda::GpuMat blobFromGpuMats(const std::vector<cv::cuda::GpuMat> &batchInput, bool normalize, const std::array<float, 3>& subVals, const std::array<float, 3>& divVals);
+
+    cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(const cv::cuda::GpuMat &input, size_t height, size_t width,
+        const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
 
     ModelParams m_config;
     std::unique_ptr<nvinfer1::IRuntime> m_runtime;
@@ -56,6 +72,8 @@ private:
     float m_imgWidth = 0;
     float m_imgHeight = 0;
     float m_ratio = 1.0f;
+
+    std::vector<float> m_featureVector;
 
     std::array<float, 3> m_subVals{0.f, 0.f, 0.f};
     std::array<float, 3> m_divVals{1.f, 1.f, 1.f};
