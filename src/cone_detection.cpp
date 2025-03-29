@@ -56,7 +56,7 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
 
 
     ModelParams params;
-    params.model_path = this->declare_parameter<std::string>("model_path");
+    params.onnxModelPath = this->declare_parameter<std::string>("model_path");
     params.classes = 
         this->declare_parameter<std::vector<std::string>>("classes");
     params.img_size = {
@@ -66,20 +66,21 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     params.iou_threshold = this->declare_parameter<float>("iou_threshold");
     params.rect_confidence_threshold = 
         this->declare_parameter<float>("rect_confidence_threshold");
+    params.enginePath = this->declare_parameter<std::string>("engine_path");
 
-    SessionOptions options;
-#ifdef USE_CUDA
-    options.cuda_enable = this->declare_parameter<bool>("cuda_enable");
-#else
-    options.cuda_enable = false;
-#endif
-    options.intra_op_num_threads = 
-        this->declare_parameter<int>("intra_op_num_threads");
-    options.log_severity_level = 
-        this->declare_parameter<int>("log_severity_level");
+    //     SessionOptions options;
+    // #ifdef USE_CUDA
+    //     options.cuda_enable = this->declare_parameter<bool>("cuda_enable");
+    // #else
+    //     options.cuda_enable = false;
+    // #endif
+    //     options.intra_op_num_threads = 
+    //         this->declare_parameter<int>("intra_op_num_threads");
+    //     options.log_severity_level = 
+    //         this->declare_parameter<int>("log_severity_level");
 
-    model_ = std::make_shared<Model>(options, params);
-
+    //     model_ = std::make_shared<Model>(options, params);
+    model_ = std::make_shared<Model>(params);
     cone_height_ = this->declare_parameter<float>("cone_height");
     params_.max_len = this->declare_parameter<float>("max_len");
     params_.min_len = this->declare_parameter<float>("min_len");
