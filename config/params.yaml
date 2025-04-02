@@ -28,7 +28,7 @@
         width: 1280
         height: 1280
         iou_threshold: 0.5
-        rect_confidence_threshold: 0.69
+        rect_confidence_threshold: 0.6
         cuda_enable: true
         log_severity_level: 3
         intra_op_num_threads: 1
