@@ -38,7 +38,10 @@ find_package(common_msgs REQUIRED)
 
 find_package(PCL REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(OpenCV 4.5 REQUIRED)
+find_package(OpenCV REQUIRED)
+
+set(TensorRT_DIR /usr/lib/x86_64-linux-gnu/)
+add_subdirectory(libs/tensorrt-cpp-api)
 
 if(BUILD_TESTING)
     find_package(ament_lint_auto REQUIRED)
@@ -81,7 +84,11 @@ target_link_libraries(${PROJECT_NAME}
     ${ONNXRUNTIME_LIB}
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
-)
+    tensorrt_cpp_api ${OpenCV_LIBS}
+    )
+
+target_include_directories(${PROJECT_NAME} PUBLIC libs/tensorrt-cpp-api/src)
+
 
 ament_auto_package(
     INSTALL_TO_SHARE

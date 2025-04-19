@@ -29,6 +29,12 @@ Model::Model(const ModelParams& params) : m_config(params) {
 }
 
 bool Model::loadEngine() {
+    std::cout << "Loading engine from: " << m_config.enginePath << std::endl;
+    std::ifstream infile(m_config.enginePath);
+    if (!infile.good()) {
+        std::cerr << "Engine file does not exist or cannot be opened: " << m_config.enginePath << std::endl;
+        return false;
+    }
     std::ifstream file(m_config.enginePath, std::ios::binary | std::ios::ate);
     std::streamsize size = file.tellg();
     file.seekg(0, std::ios::beg);
@@ -36,6 +42,7 @@ bool Model::loadEngine() {
     std::vector<char> buffer(size);
     if (!file.read(buffer.data(), size)) {
         throw std::runtime_error("Unable to read engine file");
+        return false;
     }
 
     // Create a runtime to deserialize the engine file.
@@ -80,20 +87,38 @@ bool Model::loadEngine() {
         const auto tensorType = m_engine->getTensorIOMode(tensorName);
         const auto tensorShape = m_engine->getTensorShape(tensorName);
         const auto tensorDataType = m_engine->getTensorDataType(tensorName);
-        // The binding is an output
-        uint32_t outputLength = 1;
-        m_outputDims.push_back(tensorShape);
-         for (int j = 1; j < tensorShape.nbDims; ++j) {
-            // We ignore j = 0 because that is the batch size, and we will take that
-            // into account when sizing the buffer
-            outputLength *= tensorShape.d[j];
+        if (tensorType == nvinfer1::TensorIOMode::kINPUT) {
+            // The implementation currently only supports inputs of type float
+            if (m_engine->getTensorDataType(tensorName) != nvinfer1::DataType::kFLOAT) {
+                throw std::runtime_error("Error, the implementation currently only supports float inputs");
+            }
+
+            // Don't need to allocate memory for inputs as we will be using the OpenCV
+            // GpuMat buffer directly.
+
+            // Store the input dims for later use
+            m_inputDims.emplace_back(tensorShape.d[1], tensorShape.d[2], tensorShape.d[3]);
+            m_inputBatchSize = tensorShape.d[0];
+        } else if (tensorType == nvinfer1::TensorIOMode::kOUTPUT) {
+            
+            // The binding is an output
+            uint32_t outputLength = 1;
+            m_outputDims.push_back(tensorShape);
+
+            for (int j = 1; j < tensorShape.nbDims; ++j) {
+                // We ignore j = 0 because that is the batch size, and we will take that
+                // into account when sizing the buffer
+                outputLength *= tensorShape.d[j];
+            }
+
+            m_outputLengths.push_back(outputLength);
+            // Now size the output buffer appropriately, taking into account the max
+            // possible batch size (although we could actually end up using less
+            // memory)
+            cudaMallocAsync(&m_buffers[i], outputLength * sizeof(float), stream);
+        } else {
+            throw std::runtime_error("Error, IO Tensor is neither an input or output!");
         }
-        m_outputLengths.push_back(outputLength);
-        // Now size the output buffer appropriately, taking into account the max
-        // possible batch size (although we could actually end up using less
-        // memory)
-        //checkCudaErrorCode(cudaMallocAsync(&m_buffers[i], outputLength * m_options.maxBatchSize * sizeof(float), stream));
-        cudaMallocAsync(&m_buffers[i], outputLength * sizeof(float), stream);
     }
 
     // Synchronize and destroy the cuda stream
@@ -101,10 +126,12 @@ bool Model::loadEngine() {
     // checkCudaErrorCode(cudaStreamDestroy(stream));
     cudaStreamSynchronize(stream);
     cudaStreamDestroy(stream);
+    std::cout << "Success, loaded engine from " << m_config.enginePath << std::endl;
     return true;
 }
 
 bool Model::buildEngine() {
+    std::cout << "Building engine from: " << m_config.onnxModelPath << std::endl;
     // Create our engine builder.
     auto builder = std::unique_ptr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(m_logger));
     if (!builder) {
@@ -310,7 +337,12 @@ std::vector<ModelResult> Model::postprocessDetect(std::vector<float> &m_featureV
 
 std::vector<ModelResult> Model::detect(const cv::Mat& inputImage) {
     cv::cuda::GpuMat gpuImg;
-    gpuImg.upload(inputImage);
+    try {
+        gpuImg.upload(inputImage);
+    } catch (const cv::Exception& e) {
+        std::cerr << "Error uploading image to GPU: " << e.what() << std::endl;
+        throw std::runtime_error("Error uploading image to GPU.");
+    }
     const auto input = preprocess(gpuImg);
     // Run inference using the TensorRT engine
 
@@ -423,7 +455,7 @@ std::vector<float> &m_featureVector) {
         // Copy over the input data and perform the preprocessing
         auto mfloat = blobFromGpuMats(batchInput, m_normalize, m_subVals, m_divVals);
         preprocessedInputs.push_back(mfloat);
-        m_buffers[i] = mfloat.ptr();
+        m_buffers[i] = mfloat.ptr<void>();
     }
 
     // Ensure all dynamic bindings have been defined.

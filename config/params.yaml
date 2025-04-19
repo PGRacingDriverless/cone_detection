@@ -13,7 +13,7 @@
         camera_image_topic: "/fsds/cam1/image_color"
         # Model params
         model_path: "/home/ros/ws/src/cone_detection/models/Yolov8n1280.onnx"
-        engine_path: "/home/ros/ws/src/cone_detection/models/Yolov8n1280.engine.NVIDIAGeForceRTX3060LaptopGPU.fp16.1.1"
+        engine_path: "/home/ros/ws/src/cone_detection/models/Yolov8n1280.engine"
         classes: [
             "seg_orange_cone", 
             "unknown_cone", 

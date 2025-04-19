@@ -2,8 +2,7 @@
 
 #include <opencv2/core/cuda.hpp>
 #include <opencv2/opencv.hpp>
-#include <NvInfer.h>
-#include <NvOnnxParser.h>
+#include "NvOnnxParser.h"
 #include <cuda_runtime.h>
 #include <opencv2/cudaarithm.hpp>
 #include <opencv2/cudaimgproc.hpp>
@@ -35,7 +34,7 @@ typedef struct {
     std::string enginePath;
     std::string onnxModelPath;
     std::vector<std::string> classes;
-    std::vector<int> img_size = { 640, 640 };
+    std::vector<int> img_size = { 1280, 1280 };
     float iou_threshold = 0.5;
     float rect_confidence_threshold = 0.6;
     bool useFP16 = false;
