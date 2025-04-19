@@ -32,6 +32,9 @@
 // Image detection using a model
 //#include "model_onnx.hpp"
 #include "model_trt.hpp"
+//From common
+#include "common/cone.hpp"
+#include "common/viz.hpp"
 // Standard
 #include <limits>
 #include <cmath>
@@ -55,7 +58,7 @@ struct ConeInfo {
     cv::Rect bbox;
     std::vector<pcl::PointXYZ> associated_points;
     pcl::PointXYZ average_point;
-    double confidence;
+    float confidence;
 };
 
 /**

@@ -35,6 +35,7 @@ find_package(visualization_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 
 find_package(common_msgs REQUIRED)
+find_package(common REQUIRED)
 
 find_package(PCL REQUIRED)
 find_package(Eigen3 REQUIRED)

@@ -23,7 +23,7 @@ jobs:
             - name: Install dependencies
               run: |
                 sudo apt-get update
-                sudo apt-get install cmake libarmadillo-dev libopencv-dev ros-humble-cv-bridge ros-humble-pcl-ros
+                sudo apt-get install cmake liblemon-dev libarmadillo-dev libopencv-dev ros-humble-cv-bridge ros-humble-pcl-ros
             - name: Install ONNX Runtime
               run: |
                 sudo apt-get update
@@ -49,4 +49,4 @@ jobs:
               run: |
                 source /opt/ros/humble/setup.bash
                 cd ws/
-                colcon build --symlink-install --packages-select cone_detection common_msgs --cmake-args -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
+                colcon build --symlink-install --packages-select cone_detection common common_msgs --cmake-args -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
