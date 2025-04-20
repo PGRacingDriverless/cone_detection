@@ -259,7 +259,7 @@ void ConeDetection::cone_detection_callback(
         cone_marker_msg.action = visualization_msgs::msg::Marker::ADD;
         cone_marker_msg.pose = pose;
         cone_marker_msg.scale = vector3;
-        i        // Set marker color
+        // Set marker color
         if (cone_msg.color == Color::BLUE) {
             cone_marker_msg.color = VIZ_BLUE;
         } 

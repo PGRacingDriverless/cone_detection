@@ -19,7 +19,7 @@ Model::Model(const ModelParams& params) : m_config(params) {
     m_config.classes = params.classes;
     m_config.onnxModelPath = params.onnxModelPath;
     m_config.rect_confidence_threshold = params.rect_confidence_threshold;
-    m_config.useFP16 = true; // Default to false, can be adjusted as needed
+    m_config.useFP16 = true; 
 
     if (!loadEngine()) {
         if (!buildEngine()) {
@@ -76,8 +76,7 @@ bool Model::loadEngine() {
 
     // Create a cuda stream
     cudaStream_t stream;
-    //checkCudaErrorCode(cudaStreamCreate(&stream));
-    cudaStreamCreate(&stream);
+    ConeUtil::checkCudaErrorCode(cudaStreamCreate(&stream));
 
     // Allocate GPU memory for input and output buffers
     m_outputLengths.clear();
@@ -122,10 +121,8 @@ bool Model::loadEngine() {
     }
 
     // Synchronize and destroy the cuda stream
-    // checkCudaErrorCode(cudaStreamSynchronize(stream));
-    // checkCudaErrorCode(cudaStreamDestroy(stream));
-    cudaStreamSynchronize(stream);
-    cudaStreamDestroy(stream);
+    ConeUtil::checkCudaErrorCode(cudaStreamSynchronize(stream));
+    ConeUtil::checkCudaErrorCode(cudaStreamDestroy(stream));
     std::cout << "Success, loaded engine from " << m_config.enginePath << std::endl;
     return true;
 }
@@ -138,8 +135,8 @@ bool Model::buildEngine() {
         return false;
     }
 
-    // Define an explicit batch size and then create the network (implicit batch
-    // size is deprecated). More info here:
+    // Define an explicit batch size and then create the network (implicit batch size is deprecated).
+    // More info here:
     // https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#explicit-implicit-batch
     auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
     auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(explicitBatch));
@@ -200,7 +197,7 @@ bool Model::buildEngine() {
         int32_t inputH = inputDims.d[2];
         int32_t inputW = inputDims.d[3];
 
-        // Specify the optimization profile`
+        // Specify the optimization profile
         
         optProfile->setDimensions(inputName, nvinfer1::OptProfileSelector::kMIN,
                                   nvinfer1::Dims4(1, inputC, inputH, inputW));
@@ -214,8 +211,7 @@ bool Model::buildEngine() {
 
     // CUDA stream used for profiling by the builder.
     cudaStream_t profileStream;
-    //checkCudaErrorCode(cudaStreamCreate(&profileStream));
-    cudaStreamCreate(&profileStream);
+    ConeUtil::checkCudaErrorCode(cudaStreamCreate(&profileStream));
     config->setProfileStream(profileStream);
 
     // Build the engine
@@ -233,8 +229,7 @@ bool Model::buildEngine() {
 
     std::cout << "Success, saved engine to " << m_config.enginePath << std::endl;
 
-    //checkCudaErrorCode(cudaStreamDestroy(profileStream));
-    cudaStreamDestroy(profileStream);
+    ConeUtil::checkCudaErrorCode(cudaStreamDestroy(profileStream));
     return loadEngine();
 }
 
@@ -374,8 +369,7 @@ void Model::clearGpuBuffers() {
         // Free GPU memory of outputs
         const auto numInputs = m_inputDims.size();
         for (int32_t outputBinding = numInputs; outputBinding < m_engine->getNbIOTensors(); ++outputBinding) {
-            //checkCudaErrorCode(cudaFree(m_buffers[outputBinding]));
-            cudaFree(m_buffers[outputBinding]);
+            ConeUtil::checkCudaErrorCode(cudaFree(m_buffers[outputBinding]));
         }
         m_buffers.clear();
     }
@@ -423,9 +417,8 @@ std::vector<float> &m_featureVector) {
 
     // Create the cuda stream that will be used for inference
     cudaStream_t inferenceCudaStream;
-    //Util::checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
-    cudaStreamCreate(&inferenceCudaStream);
-
+    ConeUtil::checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
+    
     std::vector<cv::cuda::GpuMat> preprocessedInputs;
 
     // Preprocess all the inputs
@@ -491,10 +484,8 @@ std::vector<float> &m_featureVector) {
     }
 
     // Synchronize the cuda stream
-    // Util::checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
-    // Util::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
-    cudaStreamSynchronize(inferenceCudaStream);
-    cudaStreamDestroy(inferenceCudaStream);
+    ConeUtil::checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
+    ConeUtil::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
     return true;
 }
 
