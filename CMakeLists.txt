@@ -39,6 +39,8 @@ find_package(common REQUIRED)
 
 find_package(PCL REQUIRED)
 find_package(Eigen3 REQUIRED)
+
+set(OpenCV_DIR "/usr/local/lib/cmake/opencv4")
 find_package(OpenCV REQUIRED)
 
 set(TensorRT_DIR /usr/lib/x86_64-linux-gnu/)
@@ -65,6 +67,7 @@ include_directories(include
     ${OpenCV_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
 )
+include_directories("/usr/local/include/opencv4")
 
 ament_auto_find_build_dependencies()
 
@@ -85,10 +88,11 @@ target_link_libraries(${PROJECT_NAME}
     ${ONNXRUNTIME_LIB}
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
-    tensorrt_cpp_api ${OpenCV_LIBS}
-    )
+    tensorrt_cpp_api
+)
 
 target_include_directories(${PROJECT_NAME} PUBLIC libs/tensorrt-cpp-api/src)
+target_include_directories(${PROJECT_NAME} PUBLIC /usr/local/include/opencv4)
 
 
 ament_auto_package(
