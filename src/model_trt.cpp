@@ -1,7 +1,4 @@
 #include "cone_detection/model_trt.hpp"
-#include <opencv2/cudaimgproc.hpp>
-#include <opencv2/dnn/dnn.hpp>
-#include <algorithm>
 
 void Logger::log(Severity severity, const char *msg) noexcept {
     // Would advise using a proper logging utility such as
@@ -20,19 +17,30 @@ Model::Model(const ModelParams& params) : m_config(params) {
     m_config.onnxModelPath = params.onnxModelPath;
     m_config.rect_confidence_threshold = params.rect_confidence_threshold;
     m_config.useFP16 = true; 
-
     if (!loadEngine()) {
         if (!buildEngine()) {
             throw std::runtime_error("Failed to build and load engine.");
         }
     }
+    // Create the cuda stream that will be used for inference
+    ConeUtil::checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
+}
+Model::~Model() {
+    // Free the GPU buffers
+    clearGpuBuffers();
+    // Destroy the cuda stream
+    ConeUtil::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
+    // Destroy the runtime and engine
+    m_context.reset();
+    m_engine.reset();
+    m_runtime.reset();
 }
 
 bool Model::loadEngine() {
     std::cout << "Loading engine from: " << m_config.enginePath << std::endl;
     std::ifstream infile(m_config.enginePath);
     if (!infile.good()) {
-        std::cerr << "Engine file does not exist or cannot be opened: " << m_config.enginePath << std::endl;
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Engine file does not exist or cannot be opened: %s", m_config.enginePath.c_str());
         return false;
     }
     std::ifstream file(m_config.enginePath, std::ios::binary | std::ios::ate);
@@ -41,7 +49,7 @@ bool Model::loadEngine() {
 
     std::vector<char> buffer(size);
     if (!file.read(buffer.data(), size)) {
-        throw std::runtime_error("Unable to read engine file");
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Unable to read engine file: %s", m_config.enginePath.c_str());
         return false;
     }
 
@@ -81,19 +89,16 @@ bool Model::loadEngine() {
     // Allocate GPU memory for input and output buffers
     m_outputLengths.clear();
     for (int i = 0; i < m_engine->getNbIOTensors(); ++i) {
-        const auto tensorName = m_engine->getIOTensorName(i);
+        const char* tensorName = m_engine->getIOTensorName(i);
         m_IOTensorNames.emplace_back(tensorName);
-        const auto tensorType = m_engine->getTensorIOMode(tensorName);
-        const auto tensorShape = m_engine->getTensorShape(tensorName);
-        const auto tensorDataType = m_engine->getTensorDataType(tensorName);
+        const nvinfer1::TensorIOMode tensorType = m_engine->getTensorIOMode(tensorName);
+        const nvinfer1::Dims tensorShape = m_engine->getTensorShape(tensorName);
         if (tensorType == nvinfer1::TensorIOMode::kINPUT) {
             // The implementation currently only supports inputs of type float
             if (m_engine->getTensorDataType(tensorName) != nvinfer1::DataType::kFLOAT) {
-                throw std::runtime_error("Error, the implementation currently only supports float inputs");
+                RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Error, the implementation currently only supports float inputs");
+                return false;
             }
-
-            // Don't need to allocate memory for inputs as we will be using the OpenCV
-            // GpuMat buffer directly.
 
             // Store the input dims for later use
             m_inputDims.emplace_back(tensorShape.d[1], tensorShape.d[2], tensorShape.d[3]);
@@ -111,26 +116,23 @@ bool Model::loadEngine() {
             }
 
             m_outputLengths.push_back(outputLength);
-            // Now size the output buffer appropriately, taking into account the max
-            // possible batch size (although we could actually end up using less
-            // memory)
             cudaMallocAsync(&m_buffers[i], outputLength * sizeof(float), stream);
         } else {
-            throw std::runtime_error("Error, IO Tensor is neither an input or output!");
+            RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Error, IO Tensor is neither an input or output!");
+            return false;
         }
     }
 
     // Synchronize and destroy the cuda stream
     ConeUtil::checkCudaErrorCode(cudaStreamSynchronize(stream));
     ConeUtil::checkCudaErrorCode(cudaStreamDestroy(stream));
-    std::cout << "Success, loaded engine from " << m_config.enginePath << std::endl;
     return true;
 }
 
 bool Model::buildEngine() {
     std::cout << "Building engine from: " << m_config.onnxModelPath << std::endl;
     // Create our engine builder.
-    auto builder = std::unique_ptr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(m_logger));
+    std::unique_ptr<nvinfer1::IBuilder> builder = std::unique_ptr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(m_logger));
     if (!builder) {
         return false;
     }
@@ -138,50 +140,44 @@ bool Model::buildEngine() {
     // Define an explicit batch size and then create the network (implicit batch size is deprecated).
     // More info here:
     // https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#explicit-implicit-batch
-    auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-    auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(explicitBatch));
+    // Batch size const at 1
+    // uint32_t explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+    std::unique_ptr<nvinfer1::INetworkDefinition> network = std::unique_ptr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(1));
     if (!network) {
         return false;
     }
 
     // Create a parser for reading the onnx file.
-    auto parser = std::unique_ptr<nvonnxparser::IParser>(nvonnxparser::createParser(*network, m_logger));
+    std::unique_ptr<nvonnxparser::IParser> parser = std::unique_ptr<nvonnxparser::IParser>(nvonnxparser::createParser(*network, m_logger));
     if (!parser) {
         return false;
     }
     // We are going to first read the onnx file into memory, then pass that buffer
-    // to the parser. Had our onnx model file been encrypted, this approach would
-    // allow us to first decrypt the buffer.
+    // to the parser.
     std::ifstream file(m_config.onnxModelPath, std::ios::binary | std::ios::ate);
     std::streamsize size = file.tellg();
     file.seekg(0, std::ios::beg);
 
     std::vector<char> buffer(size);
     if (!file.read(buffer.data(), size)) {
-        throw std::runtime_error("Unable to read engine file");
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Unable to read engine file: %s", m_config.onnxModelPath.c_str());
+        return false;
     }
 
     // Parse the buffer we read into memory.
-    auto parsed = parser->parse(buffer.data(), buffer.size());
+    bool parsed = parser->parse(buffer.data(), buffer.size());
     if (!parsed) {
         return false;
     }
 
     // Ensure that all the inputs have the same batch size
-    const auto numInputs = network->getNbInputs();
+    const int32_t numInputs = network->getNbInputs();
     if (numInputs < 1) {
-        throw std::runtime_error("Error, model needs at least 1 input!");
-    }
-    const auto input0Batch = network->getInput(0)->getDimensions().d[0];
-    for (int32_t i = 1; i < numInputs; ++i) {
-        if (network->getInput(i)->getDimensions().d[0] != input0Batch) {
-            throw std::runtime_error("Error, the model has multiple inputs, each "
-                                     "with differing batch sizes!");
-        }
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Error, model needs at least 1 input!");
+        return false;
     }
 
-
-    auto config = std::unique_ptr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
+    std::unique_ptr<nvinfer1::IBuilderConfig> config = std::unique_ptr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
     if (!config) {
         return false;
     }
@@ -190,9 +186,9 @@ bool Model::buildEngine() {
     nvinfer1::IOptimizationProfile *optProfile = builder->createOptimizationProfile();
     for (int32_t i = 0; i < numInputs; ++i) {
         // Must specify dimensions for all the inputs the model expects.
-        const auto input = network->getInput(i);
-        const auto inputName = input->getName();
-        const auto inputDims = input->getDimensions();
+        const nvinfer1::ITensor* input = network->getInput(i);
+        const char* inputName = input->getName();
+        const nvinfer1::Dims inputDims = input->getDimensions();
         int32_t inputC = inputDims.d[1];
         int32_t inputH = inputDims.d[2];
         int32_t inputW = inputDims.d[3];
@@ -210,7 +206,6 @@ bool Model::buildEngine() {
     if (m_config.useFP16) config->setFlag(nvinfer1::BuilderFlag::kFP16);
 
     // CUDA stream used for profiling by the builder.
-    cudaStream_t profileStream;
     ConeUtil::checkCudaErrorCode(cudaStreamCreate(&profileStream));
     config->setProfileStream(profileStream);
 
@@ -226,64 +221,49 @@ bool Model::buildEngine() {
     // Write the engine to disk
     std::ofstream outfile(m_config.enginePath, std::ofstream::binary);
     outfile.write(reinterpret_cast<const char *>(plan->data()), plan->size());
-
-    std::cout << "Success, saved engine to " << m_config.enginePath << std::endl;
+    outfile.close();
 
     ConeUtil::checkCudaErrorCode(cudaStreamDestroy(profileStream));
     return loadEngine();
 }
 
-std::vector<std::vector<cv::cuda::GpuMat>> Model::preprocess(const cv::cuda::GpuMat &gpuImg) {
-    // Populate the input vectors
-    const auto &inputDims = getInputDims();
+std::vector<cv::cuda::GpuMat> Model::preprocess(const cv::cuda::GpuMat &gpuImg) {
+    const std::vector<nvinfer1::Dims3> &inputDims = getInputDims();
 
     // Convert the image from BGR to RGB
-    cv::cuda::GpuMat rgbMat;
     cv::cuda::cvtColor(gpuImg, rgbMat, cv::COLOR_BGR2RGB);
 
-    auto resized = rgbMat;
-
-    // Resize to the model expected input size while maintaining the aspect ratio with the use of padding
-    if (resized.rows != inputDims[0].d[1] || resized.cols != inputDims[0].d[2]) {
-        // Only resize if not already the right size to avoid unecessary copy
-        resized = resizeKeepAspectRatioPadRightBottom(rgbMat, inputDims[0].d[1], inputDims[0].d[2], cv::Scalar(0, 0, 0));
-    }
-
-    // Convert to format expected by our inference engine
-    // The reason for the strange format is because it supports models with multiple inputs as well as batching
-    // In our case though, the model only has a single input and we are using a batch size of 1.
-    std::vector<cv::cuda::GpuMat> input{std::move(resized)};
-    std::vector<std::vector<cv::cuda::GpuMat>> inputs{std::move(input)};
-
-    // These params will be used in the post-processing stage
     m_imgHeight = rgbMat.rows;
     m_imgWidth = rgbMat.cols;
     m_ratio = 1.f / std::min(inputDims[0].d[2] / static_cast<float>(rgbMat.cols), inputDims[0].d[1] / static_cast<float>(rgbMat.rows));
 
-    return inputs;
+    // Resize to the model expected input size while maintaining the aspect ratio with the use of padding
+    if (rgbMat.rows != inputDims[0].d[1] || rgbMat.cols != inputDims[0].d[2]) {
+        rgbMat = resizeKeepAspectRatioPadRightBottom(rgbMat, inputDims[0].d[1], inputDims[0].d[2], cv::Scalar(0, 0, 0));
+    }
+
+    preprocessedInputs.clear();
+    preprocessedInputs.push_back(rgbMat);
+
+    return preprocessedInputs;
 }
 
-std::vector<ModelResult> Model::postprocessDetect(std::vector<float> &m_featureVector) {
-    const auto &outputDims = getOutputDims();
-    auto numChannels = outputDims[0].d[1];
-    auto numAnchors = outputDims[0].d[2];
+void Model::postprocessDetect(std::vector<float> &m_featureVector) {
+    const std::vector<nvinfer1::Dims> &outputDims = getOutputDims();
+    int32_t numChannels = outputDims[0].d[1];
+    int32_t numAnchors = outputDims[0].d[2];
 
-    auto numClasses = m_config.classes.size();
+    size_t numClasses = m_config.classes.size();
 
-    std::vector<cv::Rect> bboxes;
-    std::vector<float> scores;
-    std::vector<int> labels;
-    std::vector<int> indices;
-
-    cv::Mat output = cv::Mat(numChannels, numAnchors, CV_32F, m_featureVector.data());
+    output = cv::Mat(numChannels, numAnchors, CV_32F, m_featureVector.data());
     output = output.t();
 
     // Get all the YOLO proposals
     for (int i = 0; i < numAnchors; i++) {
-        auto rowPtr = output.row(i).ptr<float>();
-        auto bboxesPtr = rowPtr;
-        auto scoresPtr = rowPtr + 4;
-        auto maxSPtr = std::max_element(scoresPtr, scoresPtr + numClasses);
+        float* rowPtr = output.row(i).ptr<float>();
+        float* bboxesPtr = rowPtr;
+        float* scoresPtr = rowPtr + 4;
+        float* maxSPtr = std::max_element(scoresPtr, scoresPtr + numClasses);
         float score = *maxSPtr;
         if (score > m_config.rect_confidence_threshold) {
             float x = *bboxesPtr++;
@@ -297,7 +277,6 @@ std::vector<ModelResult> Model::postprocessDetect(std::vector<float> &m_featureV
             float y1 = std::clamp((y + 0.5f * h) * m_ratio, 0.f, m_imgHeight);
 
             int label = maxSPtr - scoresPtr;
-            cv::Rect_<float> bbox;
             bbox.x = x0;
             bbox.y = y0;
             bbox.width = x1 - x0;
@@ -311,54 +290,65 @@ std::vector<ModelResult> Model::postprocessDetect(std::vector<float> &m_featureV
 
     // Run NMS
     cv::dnn::NMSBoxesBatched(bboxes, scores, labels, m_config.rect_confidence_threshold, m_config.iou_threshold, indices);
-
-    std::vector<ModelResult> results;
-
+    ModelResult result{};
     // Choose the top k detections
     int cnt = 0;
-    for (auto &chosenIdx : indices) {
+    for (int &chosenIdx : indices) {
 
-        ModelResult result{};
         result.confidence = scores[chosenIdx];
         result.class_id = labels[chosenIdx];
         result.box = bboxes[chosenIdx];
-        results.push_back(result);
+        ret.push_back(result);
 
         cnt += 1;
     }
-
-    return results;
+    scores.clear();
+    labels.clear();
+    indices.clear();
+    bboxes.clear();
 }
 
 std::vector<ModelResult> Model::detect(const cv::Mat& inputImage) {
-    cv::cuda::GpuMat gpuImg;
+    // std::cout << "==================================================" << std::endl;
     try {
+        // auto uploadStart = std::chrono::high_resolution_clock::now();
         gpuImg.upload(inputImage);
+        // auto uploadEnd = std::chrono::high_resolution_clock::now();
+        // std::chrono::duration<double, std::milli> uploadElapsed = uploadEnd - uploadStart;
+        // std::cout << "Image upload time: " << uploadElapsed.count() << " ms" << std::endl;
     } catch (const cv::Exception& e) {
-        std::cerr << "Error uploading image to GPU: " << e.what() << std::endl;
-        throw std::runtime_error("Error uploading image to GPU.");
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Error uploading image to GPU: %s", e.what());
     }
-    const auto input = preprocess(gpuImg);
-    // Run inference using the TensorRT engine
 
-    auto succ = runInference(input, m_featureVector);
+    // auto preprocessStart = std::chrono::high_resolution_clock::now();
+    input = preprocess(gpuImg);
+    // auto preprocessEnd = std::chrono::high_resolution_clock::now();
+    // std::chrono::duration<double, std::milli> preprocessElapsed = preprocessEnd - preprocessStart;
+    // std::cout << "Preprocessing time: " << preprocessElapsed.count() << " ms" << std::endl;
+
+    // auto inferenceStart = std::chrono::high_resolution_clock::now();
+    bool succ = runInference(input, m_featureVector);
+    // auto inferenceEnd = std::chrono::high_resolution_clock::now();
+    // std::chrono::duration<double, std::milli> inferenceElapsed = inferenceEnd - inferenceStart;
+    // std::cout << "Inference time: " << inferenceElapsed.count() << " ms" << std::endl;
+
     if (!succ) {
-        throw std::runtime_error("Error: Unable to run inference.");
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Error: Unable to run inference.");
     }
 
-    std::vector<ModelResult> ret;
-
-    const auto &outputDims = getOutputDims();
-    int numChannels = outputDims[outputDims.size() - 1].d[1];
-
-    ret = postprocessDetect(m_featureVector);
+    // auto postprocessStart = std::chrono::high_resolution_clock::now();
+    ret.clear();
+    postprocessDetect(m_featureVector);
+    // auto postprocessEnd = std::chrono::high_resolution_clock::now();
+    // std::chrono::duration<double, std::milli> postprocessElapsed = postprocessEnd - postprocessStart;
+    // std::cout << "Postprocessing time: " << postprocessElapsed.count() << " ms" << std::endl;
 
     return ret;
 }
 
 std::string Model::get_class_by_id(int class_id) {
     if (class_id < 0 || static_cast<size_t>(class_id) >= m_config.classes.size()) {
-        throw std::out_of_range("Invalid class_id");
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Invalid class_id: %d", class_id);
     }
 
     return m_config.classes[class_id];
@@ -367,7 +357,7 @@ std::string Model::get_class_by_id(int class_id) {
 void Model::clearGpuBuffers() {
     if (!m_buffers.empty()) {
         // Free GPU memory of outputs
-        const auto numInputs = m_inputDims.size();
+        const int numInputs = m_inputDims.size();
         for (int32_t outputBinding = numInputs; outputBinding < m_engine->getNbIOTensors(); ++outputBinding) {
             ConeUtil::checkCudaErrorCode(cudaFree(m_buffers[outputBinding]));
         }
@@ -388,131 +378,75 @@ cv::cuda::GpuMat Model::resizeKeepAspectRatioPadRightBottom(const cv::cuda::GpuM
     return out;
 }
 
-bool Model::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inputs,
+bool Model::runInference(const std::vector<cv::cuda::GpuMat> &inputs,
 std::vector<float> &m_featureVector) {
-    // First we do some error checking
-    if (inputs.empty() || inputs[0].empty()) {
-        std::cout << "===== Error =====" << std::endl;
-        std::cout << "Provided input vector is empty!" << std::endl;
+    // Error checking
+    if (inputs.empty()) {
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Provided input vector is empty!");
         return false;
     }
 
-    const auto numInputs = m_inputDims.size();
-    if (inputs.size() != numInputs) {
-        std::cout << "===== Error =====" << std::endl;
-        std::cout << "Incorrect number of inputs provided!" << std::endl;
+    const nvinfer1::Dims3 &dims = m_inputDims[0];
+    cv::cuda::GpuMat input = inputs[0];
+    if (input.channels() != dims.d[0] || input.rows != dims.d[1] || input.cols != dims.d[2]) {
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Input does not have correct size!");
         return false;
     }
 
+    nvinfer1::Dims4 inputDims = {1, dims.d[0], dims.d[1], dims.d[2]};
+    m_context->setInputShape(m_IOTensorNames[0].c_str(), inputDims);
 
-    const auto batchSize = static_cast<int32_t>(inputs[0].size());
-    // Make sure the same batch size was provided for all inputs
-    for (size_t i = 1; i < inputs.size(); ++i) {
-        if (inputs[i].size() != static_cast<size_t>(batchSize)) {
-            std::cout << "===== Error =====" << std::endl;
-            std::cout << "The batch size =needs to be constant for all inputs!" << std::endl;
-            return false;
-        }
-    }
+    // Convert NHWC to NCHW and preprocess
+    // auto blobStart = std::chrono::high_resolution_clock::now();
+    blobFromGpuMats(inputs, m_normalize, m_subVals, m_divVals);
+    // auto blobEnd = std::chrono::high_resolution_clock::now();
+    // std::chrono::duration<double, std::milli> blobElapsed = blobEnd - blobStart;
+    // std::cout << "Blob creation time: " << blobElapsed.count() << " ms" << std::endl;
+    m_buffers[0] = blob.ptr<void>();
 
-    // Create the cuda stream that will be used for inference
-    cudaStream_t inferenceCudaStream;
-    ConeUtil::checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
-    
-    std::vector<cv::cuda::GpuMat> preprocessedInputs;
-
-    // Preprocess all the inputs
-    for (size_t i = 0; i < numInputs; ++i) {
-        const auto &batchInput = inputs[i];
-        const auto &dims = m_inputDims[i];
-
-        auto &input = batchInput[0];
-        if (input.channels() != dims.d[0] || input.rows != dims.d[1] || input.cols != dims.d[2]) {
-            std::cout << "===== Error =====" << std::endl;
-            std::cout << "Input does not have correct size!" << std::endl;
-            std::cout << "Expected: (" << dims.d[0] << ", " << dims.d[1] << ", " << dims.d[2] << ")" << std::endl;
-            std::cout << "Got: (" << input.channels() << ", " << input.rows << ", " << input.cols << ")" << std::endl;
-            std::cout << "Ensure you resize your input image to the correct size" << std::endl;
-            return false;
-        }
-
-        nvinfer1::Dims4 inputDims = {batchSize, dims.d[0], dims.d[1], dims.d[2]};
-        m_context->setInputShape(m_IOTensorNames[i].c_str(),
-            inputDims); // Define the batch size
-
-        // OpenCV reads images into memory in NHWC format, while TensorRT expects
-        // images in NCHW format. The following method converts NHWC to NCHW. Even
-        // though TensorRT expects NCHW at IO, during optimization, it can
-        // internally use NHWC to optimize cuda kernels See:
-        // https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#data-layout
-        // Copy over the input data and perform the preprocessing
-        auto mfloat = blobFromGpuMats(batchInput, m_normalize, m_subVals, m_divVals);
-        preprocessedInputs.push_back(mfloat);
-        m_buffers[i] = mfloat.ptr<void>();
-    }
-
-    // Ensure all dynamic bindings have been defined.
+    // Ensure all dynamic bindings are defined
     if (!m_context->allInputDimensionsSpecified()) {
-        throw std::runtime_error("Error, not all required dimensions specified.");
+        RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Error, not all required dimensions specified.");
     }
 
-    // Set the address of the input and output buffers
+    // Set tensor addresses
     for (size_t i = 0; i < m_buffers.size(); ++i) {
-        bool status = m_context->setTensorAddress(m_IOTensorNames[i].c_str(), m_buffers[i]);
-        if (!status) {
+        if (!m_context->setTensorAddress(m_IOTensorNames[i].c_str(), m_buffers[i])) {
             return false;
         }
     }
 
-    // Run inference.
-    bool status = m_context->enqueueV3(inferenceCudaStream);
-    if (!status) {
+    // Run inference
+    if (!m_context->enqueueV3(inferenceCudaStream)) {
         return false;
     }
 
-    // Copy the outputs back to CPU
+    // Copy outputs back to CPU asynchronously
     m_featureVector.clear();
-
-    for (int32_t outputBinding = numInputs; outputBinding < m_engine->getNbIOTensors(); ++outputBinding) {
-        // We start at index m_inputDims.size() to account for the inputs in our m_buffers
-        auto outputLength = m_outputLengths[outputBinding - numInputs];
+    for (int32_t outputBinding = 1; outputBinding < m_engine->getNbIOTensors(); ++outputBinding) {
+        uint32_t outputLength = m_outputLengths[outputBinding - 1];
         m_featureVector.resize(outputLength);
-        // Copy the output
         cudaMemcpyAsync(m_featureVector.data(),
                         static_cast<char *>(m_buffers[outputBinding]),
                         outputLength * sizeof(float), cudaMemcpyDeviceToHost, inferenceCudaStream);
     }
 
-    // Synchronize the cuda stream
+    // Synchronize the CUDA stream
     ConeUtil::checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
-    ConeUtil::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
     return true;
 }
 
-cv::cuda::GpuMat Model::blobFromGpuMats(const std::vector<cv::cuda::GpuMat> &batchInput, bool normalize, const std::array<float, 3>& subVals, const std::array<float, 3>& divVals) {
-cv::cuda::GpuMat gpu_dst(1, batchInput[0].rows * batchInput[0].cols * batchInput.size(), CV_8UC3);
-
-    size_t width = batchInput[0].cols * batchInput[0].rows;
-    for (size_t img = 0; img < batchInput.size(); img++) {
-        std::vector<cv::cuda::GpuMat> input_channels{
-        cv::cuda::GpuMat(batchInput[0].rows, batchInput[0].cols, CV_8U, &(gpu_dst.ptr()[0 + width * 3 * img])),
-        cv::cuda::GpuMat(batchInput[0].rows, batchInput[0].cols, CV_8U, &(gpu_dst.ptr()[width + width * 3 * img])),
-        cv::cuda::GpuMat(batchInput[0].rows, batchInput[0].cols, CV_8U, &(gpu_dst.ptr()[width * 2 + width * 3 * img]))};
-        cv::cuda::split(batchInput[img], input_channels); // HWC -> CHW
-    }
-
-    cv::cuda::GpuMat mfloat;
+void Model::blobFromGpuMats(const std::vector<cv::cuda::GpuMat> &batchInput, bool normalize, const std::array<float, 3>& subVals, const std::array<float, 3>& divVals) {
+    cv::cuda::split(batchInput[0], input_channels); // HWC -> CHW
     if (normalize) {
         // [0.f, 1.f]
-        gpu_dst.convertTo(mfloat, CV_32FC3, 1.f / 255.f);
+        gpu_dst.convertTo(blob, CV_32FC3, 1.f / 255.f);
     } else {
         // [0.f, 255.f]
-        gpu_dst.convertTo(mfloat, CV_32FC3);
+        gpu_dst.convertTo(blob, CV_32FC3);
     }
 
     // Apply scaling and mean subtraction
-    cv::cuda::subtract(mfloat, cv::Scalar(subVals[0], subVals[1], subVals[2]), mfloat, cv::noArray(), -1);
-    cv::cuda::divide(mfloat, cv::Scalar(divVals[0], divVals[1], divVals[2]), mfloat, 1, -1);
-
-    return mfloat;
+    cv::cuda::subtract(blob, cv::Scalar(subVals[0], subVals[1], subVals[2]), blob, cv::noArray(), -1);
+    cv::cuda::divide(blob, cv::Scalar(divVals[0], divVals[1], divVals[2]), blob, 1, -1);
 }
