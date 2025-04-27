@@ -21,3 +21,6 @@ log/
 # Generated docs
 *.dox
 *.wikidoc
+
+# Engine model
+models/Yolov8n1280.engine

@@ -141,6 +141,15 @@ private:
     std::vector<std::pair<std::string, cv::Rect>> detect_cones_on_img(
         cv_bridge::CvImagePtr cv_image_ptr
     );
+    /**
+     * Detects cones using a model.
+     * @param cuda_image image in `cv::cuda::GpuMat` format.
+     * @return vector of pairs of cone class name and cone box
+     * (`cv::Rect`).
+     */
+    std::vector<std::pair<std::string, cv::Rect>> detect_cones_on_img(
+        const cv::cuda::GpuMat& cuda_image
+    );
 
     /** Height threshold in pixels for distance filtering. */
     int height_in_pixels;

@@ -160,26 +160,53 @@ void ConeDetection::cone_detection_callback(
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr &point_cloud_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &image_msg
 ) {
-    // Convert ROS image_msg to CV image
-    cv_bridge::CvImagePtr cv_image_ptr;
-    try {
-        cv_image_ptr =
-            cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
-    }
-    catch (cv_bridge::Exception& e) {
-        RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
-        return;
-    }
 
-    // Detect cones
-    auto start = std::chrono::high_resolution_clock::now();
-    std::vector<std::pair<std::string, cv::Rect>> detected_cones = 
-        detect_cones_on_img(cv_image_ptr);
+    #ifndef NDEBUG
+        // Convert ROS image_msg to CV image
+        cv_bridge::CvImagePtr cv_image_ptr;
+        try {
+            cv_image_ptr =
+                cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
+        }
+        catch (cv_bridge::Exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
+            return;
+        }
 
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = 
-    std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    //std::cout << "Detection time: " << duration.count() << std::endl;
+        // Detect cones
+        auto start = std::chrono::high_resolution_clock::now();
+        std::vector<std::pair<std::string, cv::Rect>> detected_cones = 
+            detect_cones_on_img(cv_image_ptr);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = 
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        // std::cout << "Detection time: " << duration.count() << std::endl;
+    #else
+
+        // Upload the image to GPU memory directly from ROS message
+        cv::cuda::GpuMat cuda_image;
+        try {
+            cv_bridge::CvImageConstPtr cv_image_const_ptr = 
+                cv_bridge::toCvShare(image_msg, sensor_msgs::image_encodings::BGR8);
+            cuda_image.upload(cv_image_const_ptr->image);
+        }
+        catch (const cv_bridge::Exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
+            return;
+        }
+
+
+        // Detect cones
+        auto start = std::chrono::high_resolution_clock::now();
+        std::vector<std::pair<std::string, cv::Rect>> detected_cones = 
+            detect_cones_on_img(cuda_image);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = 
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        // std::cout << "Detection time: " << duration.count() << std::endl;
+    #endif
 
     // Filter detected cones
     detected_cones = filter_by_px_height(detected_cones);
@@ -193,7 +220,7 @@ void ConeDetection::cone_detection_callback(
     end = std::chrono::high_resolution_clock::now();
     duration = 
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    //std::cout << "Fusion time: " << duration.count() << std::endl;
+    // std::cout << "Fusion time: " << duration.count() << std::endl;
 
 #ifndef NDEBUG
     int cone_marker_id_ = 0;
@@ -343,6 +370,23 @@ std::vector<std::pair<std::string, cv::Rect>> ConeDetection::detect_cones_on_img
             -1
         );
 #endif
+    }
+
+    return detected_cones;
+}
+
+std::vector<std::pair<std::string, cv::Rect>> ConeDetection::detect_cones_on_img(
+    const cv::cuda::GpuMat& cuda_image
+) {
+    std::vector<std::pair<std::string, cv::Rect>> detected_cones;
+    
+    std::vector<ModelResult> results = model_->detect(cuda_image);
+
+    for (const auto& result : results) {
+        detected_cones.push_back(std::make_pair(
+            std::string(model_->get_class_by_id(result.class_id)),
+            result.box
+        ));
     }
 
     return detected_cones;

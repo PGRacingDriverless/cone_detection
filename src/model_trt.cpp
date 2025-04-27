@@ -122,6 +122,10 @@ bool Model::loadEngine() {
             return false;
         }
     }
+    const std::vector<nvinfer1::Dims> &outputDims = getOutputDims();
+    numChannels = outputDims[0].d[1];
+    numAnchors = outputDims[0].d[2];
+    numClasses = m_config.classes.size();
 
     // Synchronize and destroy the cuda stream
     ConeUtil::checkCudaErrorCode(cudaStreamSynchronize(stream));
@@ -228,18 +232,16 @@ bool Model::buildEngine() {
 }
 
 std::vector<cv::cuda::GpuMat> Model::preprocess(const cv::cuda::GpuMat &gpuImg) {
-    const std::vector<nvinfer1::Dims3> &inputDims = getInputDims();
-
     // Convert the image from BGR to RGB
     cv::cuda::cvtColor(gpuImg, rgbMat, cv::COLOR_BGR2RGB);
 
     m_imgHeight = rgbMat.rows;
     m_imgWidth = rgbMat.cols;
-    m_ratio = 1.f / std::min(inputDims[0].d[2] / static_cast<float>(rgbMat.cols), inputDims[0].d[1] / static_cast<float>(rgbMat.rows));
+    m_ratio = 1.f / std::min(imgH / static_cast<float>(rgbMat.cols), imgW / static_cast<float>(rgbMat.rows));
 
     // Resize to the model expected input size while maintaining the aspect ratio with the use of padding
-    if (rgbMat.rows != inputDims[0].d[1] || rgbMat.cols != inputDims[0].d[2]) {
-        rgbMat = resizeKeepAspectRatioPadRightBottom(rgbMat, inputDims[0].d[1], inputDims[0].d[2], cv::Scalar(0, 0, 0));
+    if (rgbMat.rows != imgW || rgbMat.cols != imgH) {
+        rgbMat = resizeKeepAspectRatioPadRightBottom(rgbMat, imgW, imgH, cv::Scalar(0, 0, 0));
     }
 
     preprocessedInputs.clear();
@@ -249,12 +251,6 @@ std::vector<cv::cuda::GpuMat> Model::preprocess(const cv::cuda::GpuMat &gpuImg) 
 }
 
 void Model::postprocessDetect(std::vector<float> &m_featureVector) {
-    const std::vector<nvinfer1::Dims> &outputDims = getOutputDims();
-    int32_t numChannels = outputDims[0].d[1];
-    int32_t numAnchors = outputDims[0].d[2];
-
-    size_t numClasses = m_config.classes.size();
-
     output = cv::Mat(numChannels, numAnchors, CV_32F, m_featureVector.data());
     output = output.t();
 
@@ -308,8 +304,7 @@ void Model::postprocessDetect(std::vector<float> &m_featureVector) {
     bboxes.clear();
 }
 
-std::vector<ModelResult> Model::detect(const cv::Mat& inputImage) {
-    // std::cout << "==================================================" << std::endl;
+std::vector<ModelResult> Model::detect(const cv::Mat& inputImage){
     try {
         // auto uploadStart = std::chrono::high_resolution_clock::now();
         gpuImg.upload(inputImage);
@@ -319,6 +314,11 @@ std::vector<ModelResult> Model::detect(const cv::Mat& inputImage) {
     } catch (const cv::Exception& e) {
         RCLCPP_ERROR(rclcpp::get_logger("cone_detection"), "Error uploading image to GPU: %s", e.what());
     }
+    return detect(gpuImg);
+}
+
+std::vector<ModelResult> Model::detect(const cv::cuda::GpuMat& gpuImg) {
+    // std::cout << "==================================================" << std::endl;
 
     // auto preprocessStart = std::chrono::high_resolution_clock::now();
     input = preprocess(gpuImg);

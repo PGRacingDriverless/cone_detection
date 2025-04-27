@@ -62,6 +62,7 @@ public:
     Model(const ModelParams& config);
     ~Model();
     std::vector<ModelResult> detect(const cv::Mat& inputImage);
+    std::vector<ModelResult> detect(const cv::cuda::GpuMat& gpuImg);
     std::string get_class_by_id(int class_id);
     [[nodiscard]] const std::vector<nvinfer1::Dims3> &getInputDims() const { return m_inputDims; };
     [[nodiscard]] const std::vector<nvinfer1::Dims> &getOutputDims() const { return m_outputDims; };
@@ -126,5 +127,9 @@ private:
     std::vector<float> scores;
     std::vector<int> labels;
     std::vector<int> indices;
+
+    int32_t numChannels;
+    int32_t numAnchors;
+    size_t numClasses;
     
 };
