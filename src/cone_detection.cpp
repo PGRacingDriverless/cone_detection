@@ -57,6 +57,8 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
 
     ModelParams params;
     params.onnxModelPath = this->declare_parameter<std::string>("model_path");
+    params.calibrationDataPath = 
+        this->declare_parameter<std::string>("calibration_data_path");
     params.classes = 
         this->declare_parameter<std::vector<std::string>>("classes");
     params.img_size = {
@@ -205,7 +207,7 @@ void ConeDetection::cone_detection_callback(
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = 
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-        // std::cout << "Detection time: " << duration.count() << std::endl;
+        std::cout << "Detection time: " << duration.count() << std::endl;
     #endif
 
     // Filter detected cones

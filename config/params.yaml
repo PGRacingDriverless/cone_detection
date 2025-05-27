@@ -14,6 +14,8 @@
         # Model params
         model_path: "/home/ros/ws/src/cone_detection/models/Yolov8n1280.onnx"
         engine_path: "/home/ros/ws/src/cone_detection/models/Yolov8n1280.engine"
+        calibration_engine_path: "/home/ros/ws/src/cone_detection/models/Yolov8n1280_INT8.engine"
+        calibration_data_path: "/home/ros/ws/src/cone_detection/calibration_data/"
         classes: [
             "seg_orange_cone", 
             "unknown_cone", 

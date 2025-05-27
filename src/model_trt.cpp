@@ -16,7 +16,7 @@ Model::Model(const ModelParams& params) : m_config(params) {
     m_config.classes = params.classes;
     m_config.onnxModelPath = params.onnxModelPath;
     m_config.rect_confidence_threshold = params.rect_confidence_threshold;
-    m_config.useFP16 = true; 
+    m_config.useFP16 = false; // Set to true if you want to use FP16 precision
     if (!loadEngine()) {
         if (!buildEngine()) {
             throw std::runtime_error("Failed to build and load engine.");
@@ -207,7 +207,37 @@ bool Model::buildEngine() {
                                   nvinfer1::Dims4(1, inputC, inputH, inputW));
     }
     config->addOptimizationProfile(optProfile);
-    if (m_config.useFP16) config->setFlag(nvinfer1::BuilderFlag::kFP16);
+    if (m_config.useFP16) {
+        config->setFlag(nvinfer1::BuilderFlag::kFP16);
+    }else{
+        if (numInputs > 1) {
+            throw std::runtime_error("Error, this implementation currently only supports INT8 "
+                                     "quantization for single input models");
+        }
+
+        // Ensure the GPU supports INT8 Quantization
+        if (!builder->platformHasFastInt8()) {
+            throw std::runtime_error("Error: GPU does not support INT8 precision");
+        }
+
+        // Ensure the user has provided path to calibration data directory
+        if (m_config.calibrationDataPath.empty()) {
+            throw std::runtime_error("Error: If INT8 precision is selected, must provide path to "
+                                     "calibration data directory to Engine::build method");
+        }
+
+        config->setFlag(nvinfer1::BuilderFlag::kINT8);
+
+        const nvinfer1::ITensor* input = network->getInput(0);
+        const char* inputName = input->getName();
+        const nvinfer1::Dims inputDims = input->getDimensions();
+        const char* calibrationFileName = "/home/ros/ws/src/cone_detection/models/Yolov8n1280.engine.calibration";
+
+        m_calibrator = std::make_unique<Int8EntropyCalibrator2>(m_config.calibrationBatchSize, inputDims.d[3], inputDims.d[2],
+                                                                m_config.calibrationDataPath, calibrationFileName, inputName,
+                                                                m_subVals, m_divVals, m_normalize);
+        config->setInt8Calibrator(m_calibrator.get());
+    }
 
     // CUDA stream used for profiling by the builder.
     ConeUtil::checkCudaErrorCode(cudaStreamCreate(&profileStream));
