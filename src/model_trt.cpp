@@ -12,16 +12,23 @@ void Logger::log(Severity severity, const char *msg) noexcept {
 }
 
 Model::Model(const ModelParams& params) : m_config(params) {
-    m_config.enginePath = params.enginePath;
     m_config.classes = params.classes;
     m_config.onnxModelPath = params.onnxModelPath;
     m_config.rect_confidence_threshold = params.rect_confidence_threshold;
-    m_config.useFP16 = false; // Set to true if you want to use FP16 precision
+    m_config.useFP16 = params.useFP16; // Set to true if you want to use FP16 precision
+    
+    if(m_config.useFP16){
+        m_config.enginePath = params.enginePath;
+    }else{
+        m_config.enginePath = params.quantizedEnginePath;
+    }
+    
     if (!loadEngine()) {
         if (!buildEngine()) {
             throw std::runtime_error("Failed to build and load engine.");
         }
     }
+
     // Create the cuda stream that will be used for inference
     ConeUtil::checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
 }

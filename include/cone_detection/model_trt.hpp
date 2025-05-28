@@ -81,6 +81,7 @@ private:
 typedef struct {
     std::string enginePath;
     std::string onnxModelPath;
+    std::string quantizedEnginePath;
     std::string calibrationDataPath;
     int32_t calibrationBatchSize = 64;
     std::vector<std::string> classes;

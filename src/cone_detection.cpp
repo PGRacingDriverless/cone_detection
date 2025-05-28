@@ -56,6 +56,10 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
 
 
     ModelParams params;
+    // If using INT8 quantization, add calibration dataset to cone_detection/calibration_data
+    params.useFP16 = this->declare_parameter<bool>("use_fp16");
+    params.enginePath = this->declare_parameter<std::string>("engine_path");
+    params.quantizedEnginePath = this->declare_parameter<std::string>("quantized_engine_path");
     params.onnxModelPath = this->declare_parameter<std::string>("model_path");
     params.calibrationDataPath = 
         this->declare_parameter<std::string>("calibration_data_path");
@@ -68,7 +72,6 @@ ConeDetection::ConeDetection(const rclcpp::NodeOptions &node_options)
     params.iou_threshold = this->declare_parameter<float>("iou_threshold");
     params.rect_confidence_threshold = 
         this->declare_parameter<float>("rect_confidence_threshold");
-    params.enginePath = this->declare_parameter<std::string>("engine_path");
 
     //     SessionOptions options;
     // #ifdef USE_CUDA
